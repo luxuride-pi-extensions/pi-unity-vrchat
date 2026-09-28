@@ -25,7 +25,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkTemplate } from "./agent-template-checks.mjs";
+import { checkTemplate, usesTodo } from "./agent-template-checks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXT_ROOT = resolve(HERE, "..");
@@ -65,17 +65,13 @@ function resolveTodoEntry() {
 }
 
 /**
- * Whether a template needs the todo provider, read from the template's OWN
- * `tools:` line rather than from a hardcoded flag here. The flag was a second
- * source of truth that could disagree with the template: a manager could name
- * `todo` and not be given a provider, or be given one it never calls.
+ * `usesTodo` is the SHARED check, not a local copy: whether a template needs the
+ * todo provider is read from the template's OWN `tools:` line rather than from a
+ * hardcoded flag here. A flag was a second source of truth that could disagree
+ * with the template — a manager could name `todo` and not be given a provider,
+ * or be given one it never calls — and a second copy of the rule is how that
+ * starts happening again.
  */
-function usesTodo(source) {
-	const line = /^tools:.*$/m.exec(source)?.[0] ?? "";
-	return line
-		.split(",")
-		.some((tool) => tool.trim() === "todo");
-}
 
 const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
 
