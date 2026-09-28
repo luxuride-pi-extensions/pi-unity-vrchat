@@ -340,6 +340,54 @@ export const requestLiveUnityExportObj = (options: {
 		payload: { type: "export-obj", outputPath: options.outputPath, gameObjectNames: options.gameObjectNames },
 	});
 
+/**
+ * Read-only: which real model files does this selection resolve to?
+ *
+ * Both renderer kinds must be walked to get a real answer. A MeshFilter-only
+ * walk MISSES THE ENTIRE AVATAR, because the body is a SkinnedMeshRenderer and
+ * never appears in a MeshFilter enumeration -- so "no source models" can be
+ * true of a fully file-backed avatar purely because the wrong walk was used.
+ *
+ * Call this before export-source-models to see what will travel, or to explain
+ * why a mesh cannot be handed over as a file at all.
+ */
+export const requestLiveUnityFindSourceModels = (options: {
+	gameObjectNames?: string[];
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnitySourceModelsResult>({
+		timeoutMs: options.timeoutMs,
+		payload: {
+			type: "find-source-models",
+			// An empty list means every scene root, which is the C# side's
+			// documented behaviour, not an absent argument.
+			gameObjectNames: options.gameObjectNames ?? [],
+		},
+	});
+
+/**
+ * Copies the resolved source model FILES into a staging directory.
+ *
+ * Copying rather than re-exporting is the point: the FBX Unity itself imported
+ * is exactly what Blender then imports, so no rig or material description is
+ * lost in translation. A source referenced by the scene but absent from disk is
+ * reported in `missingSources` rather than thrown, because a library-only
+ * checkout is a normal state, not an error.
+ */
+export const requestLiveUnityExportSourceModels = (options: {
+	outputDir: string;
+	gameObjectNames?: string[];
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnitySourceModelsResult>({
+		timeoutMs: options.timeoutMs,
+		payload: {
+			type: "export-source-models",
+			outputDir: options.outputDir,
+			gameObjectNames: options.gameObjectNames ?? [],
+		},
+	});
+
 export function listStaleResponseFiles(): string[] {
 	const { responsesDir } = getLiveBridgePaths();
 	try {

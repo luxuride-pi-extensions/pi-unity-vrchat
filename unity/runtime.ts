@@ -45,6 +45,8 @@ export {
 	requestLiveUnityBones,
 	requestLiveUnityImportFbx,
 	requestLiveUnityExportObj,
+	requestLiveUnityFindSourceModels,
+	requestLiveUnityExportSourceModels,
 	requestLiveUnityInspect,
 	requestLiveUnitySceneInfo,
 	requestLiveUnitySessionContext,
@@ -72,6 +74,8 @@ export {
 	type UnitySessionContext,
 	type UnityImportFbxResult,
 	type UnityExportObjResult,
+	type UnitySourceModel,
+	type UnitySourceModelsResult,
 } from "./types.js";
 
 export {

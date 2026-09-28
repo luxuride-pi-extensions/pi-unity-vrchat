@@ -155,6 +155,7 @@ build that skipped your code.
 | `unity_inspect` | Read a component's **serialized properties** — what the Inspector shows, for any component including VRChat/lilToon/VRCFury. |
 | `unity_set_property` | Write one serialized property, parsed by the property's own type. Undoable. |
 | `unity_set_transform` | Move / rotate / scale a GameObject or a rig bone, in world or local space. Undoable. |
+| `unity_source_models` | Which real model **files** a selection resolves to. `find` reports, `export` copies them out for another application to open verbatim. |
 | `unity_vrc` | **VRChat avatar** helpers: package/optimizer readiness, VRCFury, lilToon, bone paths. |
 | `unity_world` | **VRChat world** helpers: light volumes, Udon, scene descriptor. |
 | `unity_render` | Render through a **camera** with the real lighting and materials. |

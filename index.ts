@@ -1,7 +1,7 @@
 /**
  * pi extension: Unity integration.
  *
- * Registers 11 unity_* tools + bundled skills, the /unity slash command, and
+ * Registers 19 unity_* tools + bundled skills, the /unity slash command, and
  * injects Unity workflow guidance + live Editor state before turns that engage
  * the extension.
  *
@@ -23,6 +23,9 @@ import {
 	requestLiveUnityInspect,
 	requestLiveUnitySetProperty,
 	requestLiveUnitySetTransform,
+	requestLiveUnityFindSourceModels,
+	requestLiveUnityExportSourceModels,
+	unityCaptureView,
 	requestLiveUnityVrc,
 	requestLiveUnityWorld,
 	unityBridgeStatus,
@@ -268,6 +271,53 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				bones: params.bones,
 				limit: params.limit,
 			});
+			markUnityEngaged();
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_source_models",
+		label: "Unity Source Models",
+		description:
+			"Which real model FILES on disk does this selection resolve to? This is the read-only half of the Unity->Blender handoff. " +
+			"mode:\"find\" (default) reports without copying anything; mode:\"export\" copies each resolved file into outputDir so another application can open it verbatim. " +
+			"Copying beats re-exporting: an FBX carries the rig and the material description that a re-exported OBJ flattens away, and a file has no sub-mesh selection, so a file with 6 sub-meshes travels whole even if you named one. " +
+			"Meshes with NO file behind them (Unity's built-in primitives, procedural geometry) come back under unhandoffableNames -- and unhandoffableCounts says how many objects share each name, because a name is not a unique identifier and exporting one of five identically-named objects while reporting all five is a lie. " +
+			"Omit gameObjectNames to cover every scene root.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			gameObjectNames: Type.Optional(
+				Type.Array(Type.String(), {
+					description:
+						"GameObject names to resolve. Omit or pass [] to cover every scene root, which is how an entire avatar is resolved at once.",
+				}),
+			),
+			mode: Type.Optional(
+				Type.Union([Type.Literal("find"), Type.Literal("export")], {
+					description:
+						"\"find\" (default) reports what would travel. \"export\" copies the files to outputDir.",
+					default: "find",
+				}),
+			),
+			outputDir: Type.Optional(
+				Type.String({
+					description:
+						'Required for mode:"export". The destination directory for the copied model files. Put it in a scratch/cache location, never inside the project.',
+				}),
+			),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			const names = params.gameObjectNames ?? [];
+			const result =
+				params.mode === "export"
+					? await requestLiveUnityExportSourceModels({
+							outputDir: params.outputDir ?? "",
+							gameObjectNames: names,
+						})
+					: await requestLiveUnityFindSourceModels({ gameObjectNames: names });
 			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
@@ -530,6 +580,39 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				workspace: params.workspace,
 				outputName: params.outputName,
 				cameraName: params.cameraName,
+				width: params.width,
+				height: params.height,
+				timeoutSeconds: params.timeoutSeconds,
+				signal,
+			});
+			markUnityEngaged();
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_capture_view",
+		label: "Unity Capture View",
+		description:
+			"Capture the live Scene view into the current iteration folder -- what the artist is looking at, with overlays and the Scene camera's own framing. " +
+			"Use unity_render instead to judge lighting, materials, and post-processing; a Scene view has neither, so a material that renders white can look fine here. " +
+			"This is the one to use while iterating on layout, scale, and composition. Needs a pi workspace: it claims an iteration slot and writes into it.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			outputName: Type.Optional(
+				Type.String({ description: "File name inside the iteration renders folder. A .png extension is added if missing.", default: "render.png" }),
+			),
+			width: Type.Optional(Type.Number({ description: "Output width in pixels.", default: 960 })),
+			height: Type.Optional(Type.Number({ description: "Output height in pixels.", default: 540 })),
+			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
+		}),
+		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			const result = await unityCaptureView({
+				cwd: ctx.cwd,
+				workspace: params.workspace,
+				outputName: params.outputName,
 				width: params.width,
 				height: params.height,
 				timeoutSeconds: params.timeoutSeconds,

@@ -320,6 +320,58 @@ export interface UnityExportObjResult {
 	materialNames: string[];
 }
 
+/**
+ * One source model file a selection resolves to.
+ *
+ * `objects` lists which meshes were asked for; the FILE is the unit of
+ * handoff, so a file with 6 sub-meshes travels whole even if you named one.
+ */
+export interface UnitySourceModel {
+	assetPath: string;
+	absolutePath?: string;
+	fileName?: string;
+	/** Export request only: where the file was copied to. */
+	stagedPath?: string;
+	/** Export request only: false when the source is absent from disk. */
+	copied?: boolean;
+	bytes?: number;
+	error?: string;
+	objects: string[];
+	vertexTotal: number;
+	boneTotal: number;
+	exists?: boolean;
+}
+
+/**
+ * Result of find-source-models / export-source-models.
+ *
+ * The three unhandoffable fields answer three different questions, and
+ * conflating them is how a transfer reports success while dropping objects:
+ *   unhandoffableObjects - "name -> path", for a human reading why it stayed
+ *   unhandoffableNames   - bare GameObject names, usable as export-obj input
+ *   unhandoffableCounts  - how many objects share each of those names
+ *
+ * The count exists because export-obj resolves a NAME to exactly ONE
+ * GameObject. Five objects called "sphere" cannot all be exported by passing
+ * that one name, so the binder reports them as not-transferred rather than
+ * moving one and reporting all five.
+ */
+export interface UnitySourceModelsResult {
+	models: UnitySourceModel[];
+	/** Export request only. */
+	stagedPaths?: string[];
+	/** Export request only: sources referenced by the scene but absent on disk. */
+	missingSources?: string[];
+	unhandoffableObjects: string[];
+	unhandoffableNames: string[];
+	unhandoffableCounts: Record<string, number>;
+	modelCount?: number;
+	copiedCount?: number;
+	missingCount?: number;
+	unhandoffableCount: number;
+	scope?: string;
+}
+
 export interface UnityOpenSceneResult {
 	switched: boolean;
 	scenePath: string;
