@@ -255,6 +255,94 @@ await withEditor(async () => {
 	);
 });
 
+console.log("bridge status: logs and a corrupt lock");
+
+await withEditor(async ({ bridgeDir }) => {
+	const status = await jiti.import(join(EXT, "unity", "status.ts"), { default: false });
+
+	// get-log was implemented in C# with no TS wrapper at all: the one place a
+	// caller is told where to look when a request failed was unreachable. It is
+	// also the only request that can REPORT a path that does not exist, so the
+	// wrapper must pass the probe flag through rather than assume the file is
+	// there.
+	const logs = await (await loadBridge()).requestLiveUnityLog({ timeoutMs: 5_000 });
+	check("get-log returns candidates", Array.isArray(logs?.logs) && logs.logs.length === 3, JSON.stringify(logs));
+	check(
+		"each candidate is probed, not asserted",
+		logs.logs.every((l) => typeof l.exists === "boolean" && typeof l.role === "string"),
+		JSON.stringify(logs.logs),
+	);
+	check(
+		"the Editor's own log is distinguished from the player log",
+		logs.logs.some((l) => l.exists === true && l.role.includes("Editor log")) &&
+			logs.logs.some((l) => l.exists === false && l.role === "player log"),
+		JSON.stringify(logs.logs),
+	);
+
+	// Idle + alive: the log lookup runs.
+	const healthy = await status.unityBridgeStatus({ isAlive: () => true });
+	check("status carries the log section", Array.isArray(healthy.logs?.logs));
+	check("an idle reachable Editor is not an error", healthy.logError === null, String(healthy.logError));
+	check("idle Editor reports ready", healthy.recommendation.includes("idle and ready"), healthy.recommendation);
+
+	// A failing log lookup must not fail the status call. This is the one tool
+	// that has to stay safe to call exactly when things are broken, so a throw
+	// here would be worse than an empty log section.
+	const degraded = await status.unityBridgeStatus({
+		isAlive: () => true,
+		readLogs: async () => {
+			throw new Error("bridge went away mid-lookup");
+		},
+	});
+	check("a failed log lookup does not throw", degraded.logs === null);
+	check("the failure is reported, not swallowed", degraded.logError?.includes("mid-lookup"), String(degraded.logError));
+	check("the Editor is still described as reachable", degraded.recommendation.includes("reachable"), degraded.recommendation);
+
+	// Dead Editor: no log lookup at all, because it cannot succeed.
+	const dead = await status.unityBridgeStatus({ isAlive: () => false });
+	check("a dead Editor is not asked for logs", dead.logs === null && dead.logError === null);
+
+	// Busy Editor: deliberately NOT asked, because the lookup takes the bridge
+	// lock and would queue behind the very request being reported on. A real
+	// lock file is what makes it busy — stubbing a field would test the stub.
+	writeFileSync(
+		join(bridgeDir, "bridge.lock"),
+		JSON.stringify({ pid: 4242, label: "in-flight", acquiredAt: new Date().toISOString() }),
+	);
+	await sleep(50);
+	let lookedWhileBusy = false;
+	const busy = await status.unityBridgeStatus({
+		isAlive: () => true,
+		readLogs: async () => {
+			lookedWhileBusy = true;
+			return { logs: [] };
+		},
+	});
+	check("a busy Editor does not get asked for logs", lookedWhileBusy === false);
+	check("a held lock is busy", busy.busy === true, JSON.stringify(busy.lock));
+	check("a held lock is not flagged unreadable", busy.lock?.unreadable === false, JSON.stringify(busy.lock));
+	rmSync(join(bridgeDir, "bridge.lock"), { force: true });
+	await sleep(50);
+
+	// A lock file that exists but does not parse is still a HELD lock. Reporting
+	// it as absent made the status tool say "idle" while a request was in
+	// flight, which invites exactly the concurrent mutation the lock prevents.
+	writeFileSync(join(bridgeDir, "bridge.lock"), "{corrupt");
+	await sleep(50);
+	const corrupt = await status.unityBridgeStatus({ isAlive: () => true });
+	check("a corrupt lock still counts as busy", corrupt.busy === true, JSON.stringify(corrupt.lock));
+	check("the lock is flagged unreadable", corrupt.lock?.unreadable === true, JSON.stringify(corrupt.lock));
+	check(
+		"a corrupt lock is explained, not reported as idle",
+		corrupt.recommendation.includes("did not") && corrupt.recommendation.includes("parse"),
+		corrupt.recommendation,
+	);
+	rmSync(join(bridgeDir, "bridge.lock"), { force: true });
+	await sleep(50);
+	const cleared = await status.unityBridgeStatus({ isAlive: () => true });
+	check("removing the lock clears busy", cleared.busy === false, JSON.stringify(cleared.lock));
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {
 	for (const failure of failures) console.log(`  - ${failure}`);

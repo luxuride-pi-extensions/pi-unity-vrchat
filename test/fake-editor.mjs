@@ -55,6 +55,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const HANDLERS = {
 	ping: () => ({ pong: true }),
 
+	// Mirrors the C# side: each candidate is probed and `exists` is the field
+	// that stops a caller trusting a path that is not there. unity_bridge_status
+	// reads this, so a handler-less "get-log" would surface as logError instead of
+	// a report.
+	"get-log": () => ({
+		logs: [
+			{ path: "/tmp/fake-bridge/Editor-csharp.log", role: "pi bridge log", exists: false },
+			{ path: "/tmp/fake-unity3d/Editor.log", role: "Unity Editor log for this process", exists: true },
+			{ path: "/tmp/fake-project/Logs/Editor.log", role: "player log", exists: false },
+		],
+	}),
+
 	"get-session-context": () => ({
 		projectPath: "/tmp/fake-project",
 		scene: { name: "FakeScene", path: "/tmp/fake-project/Assets/FakeScene.unity" },

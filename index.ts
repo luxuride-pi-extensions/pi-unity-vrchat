@@ -130,13 +130,16 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityWorkspaceInit({
 				workspacePath: normalizeWorkspacePath(ctx.cwd, params.workspace),
 				template: params.template as "3d" | "blank" | undefined,
 				sourceProject: params.sourceProject,
 				continueExisting: params.continueExisting,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -177,6 +180,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityExecuteCSharp({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -187,7 +194,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				timeoutSeconds: params.timeoutSeconds,
 				signal,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -203,8 +209,11 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: params.workspace });
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
 			markUnityEngaged();
+			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: params.workspace });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -226,13 +235,16 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await getSceneInfo({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
 				categories: params.categories as never,
 				signal,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -266,12 +278,15 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnityBones({
 				gameObject: params.gameObject,
 				bones: params.bones,
 				limit: params.limit,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -310,6 +325,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const names = params.gameObjectNames ?? [];
 			const result =
 				params.mode === "export"
@@ -318,7 +337,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 							gameObjectNames: names,
 						})
 					: await requestLiveUnityFindSourceModels({ gameObjectNames: names });
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -343,12 +361,15 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnityInspect({
 				gameObject: params.gameObject,
 				component: params.component,
 				includeChildComponents: params.includeChildren,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -377,6 +398,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnitySetProperty({
 				gameObject: params.gameObject,
 				component: params.component,
@@ -384,7 +409,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				value: params.value,
 				space: params.space,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -411,6 +435,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnitySetTransform({
 				gameObject: params.gameObject,
 				position: params.position,
@@ -418,7 +446,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				scale: params.scale,
 				space: params.space,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -460,6 +487,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			child: Type.Optional(Type.String({ description: "path only: a bone or child name to resolve under the avatar." })),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnityVrc({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -468,7 +499,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				materialPath: params.materialPath,
 				child: params.child,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -515,6 +545,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await requestLiveUnityWorld({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -524,7 +558,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				intensity: params.intensity,
 				color: params.color,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -542,6 +575,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			cameraName: Type.String({ description: "Name of the camera GameObject this view uses." }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const workspacePath = normalizeWorkspacePath(ctx.cwd, params.workspace);
 			await assertCameraExists(workspacePath, params.cameraName);
 			const result = await unitySaveView({
@@ -550,7 +587,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				name: params.name,
 				cameraName: params.cameraName,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -575,6 +611,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityRender({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -585,7 +625,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				timeoutSeconds: params.timeoutSeconds,
 				signal,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -609,6 +648,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityCaptureView({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -618,7 +661,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				timeoutSeconds: params.timeoutSeconds,
 				signal,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -647,6 +689,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityModuleRun({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -656,7 +702,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				resolution: params.resolution,
 				timeoutSeconds: params.timeoutSeconds,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -684,6 +729,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = await unityModuleRevert({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -691,7 +740,6 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 				iteration: params.iteration,
 				force: params.force,
 			});
-			markUnityEngaged();
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -704,8 +752,11 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			tool: Type.String({ description: "Transform tool to activate." }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			const result = await unitySetTool({ tool: params.tool });
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
 			markUnityEngaged();
+			const result = await unitySetTool({ tool: params.tool });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -735,6 +786,10 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			}),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
+			markUnityEngaged();
 			const result = unityLogCritique({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -762,8 +817,11 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			const result = unityBridgeStatus();
+			// Engagement is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the session engaged and the guidance injected.
 			markUnityEngaged();
+			const result = await unityBridgeStatus();
 			const details = { ...result, requestedWorkspace: params.workspace };
 			return { content: [{ type: "text", text: formatJsonResult(details) }], details };
 		},

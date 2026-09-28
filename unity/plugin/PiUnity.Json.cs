@@ -55,17 +55,6 @@ namespace PiUnity
 			return json;
 		}
 
-		/// Adds a pre-serialized JSON value under a key, verbatim.
-		///
-		/// For maps whose keys are only known at runtime -- bone names, property
-		/// paths -- the value must be spliced in as text. OpenObject() would
-		/// produce a JSON array instead, and `[`"Hips":{...}` is a syntax error.
-		public Json AddRaw(string key, string rawJson)
-		{
-			Separator();
-			buffer.Append(Quote(key)).Append(':').Append(rawJson);
-			return this;
-		}
 		public static Json Array(Json[] items)
 		{
 			Json json = new Json();

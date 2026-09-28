@@ -120,15 +120,29 @@ for (const spec of EXTENSIONS) {
 	sessionStart?.();
 	check("new session: silent again", (await injected(pi)) === undefined);
 
-	// A tool call also engages, and engagement survives idle turns after that.
-	const tool = tools.find((t) => t.name === spec.tool);
-	try {
-		await tool?.execute({}, undefined);
-	} catch {
-		// A status call may legitimately fail with no editor running. The
-		// engagement flag is set before any work, so a throw is fine here.
+	// EVERY tool must engage, not just one. Checking a single tool is what let
+	// unity_log_critique ship without markUnityEngaged(): 18 of 19 tools engaged
+	// and the suite was green, because the tool it happened to exercise was one
+	// of the 18. So each registered tool is called in a FRESH session and must be
+	// the thing that turns injection on.
+	const silent = [];
+	for (const tool of tools) {
+		sessionStart?.();
+		try {
+			await tool.execute({}, undefined);
+		} catch {
+			// A tool may legitimately fail with no editor or workspace; the
+			// engagement flag is set before any work, so a throw is fine.
+		}
+		if ((await injected(pi))?.message === undefined) silent.push(tool.name);
 	}
-	check(`after ${spec.tool}: injects`, (await injected(pi))?.message !== undefined);
+	check(
+		`every one of ${tools.length} tools engages the session`,
+		silent.length === 0,
+		silent.join(", "),
+	);
+
+	// Engagement survives idle turns once any tool has fired.
 	check("stays engaged on later turns", (await injected(pi))?.message !== undefined);
 }
 

@@ -39,26 +39,13 @@ namespace PiUnity
 		private const string Components = "com.vrcfury.api.FuryComponents";
 		private const string Utils = "com.vrcfury.api.FuryUtils";
 
-		/// The VRCFury components pi knows how to add, and the type each is
-		/// created through. Read out of the live assembly, not a guess.
+		/// The VRCFury elements pi knows how to add, and the factory method each
+		/// is created through. Read out of the live assembly, not a guess.
 		///
-		/// "create" is the FuryComponents factory method; "component" is the type
-		/// it returns. Exposed as data so the TS layer and a model can read the
-		/// list without hard-coding it, and so a project with a different VRCFury
-		/// version reports what IT has rather than what this file expects.
+		/// Exposed as data so the TS layer and a model can read the list without
+		/// hard-coding it, and so a project with a different VRCFury version
+		/// reports what IT has rather than what this file expects.
 		public static readonly string[] AddableElements = { "armature-link", "full-controller", "toggle", "socket" };
-
-		private static string FactoryType(string element)
-		{
-			switch (element)
-			{
-				case "armature-link": return "com.vrcfury.api.FuryArmatureLink";
-				case "full-controller": return "com.vrcfury.api.FuryFullController";
-				case "toggle": return "com.vrcfury.api.FuryToggle";
-				case "socket": return "com.vrcfury.api.FurySocket";
-				default: return null;
-			}
-		}
 
 		private static string FactoryMethod(string element)
 		{

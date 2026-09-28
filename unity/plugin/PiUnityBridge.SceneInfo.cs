@@ -236,14 +236,65 @@ namespace PiUnity
 			return status;
 		}
 
+		/// Where the logs actually are.
+		///
+		/// Reporting a path that does not exist is worse than reporting nothing:
+		/// a caller who is told "the log is at X" opens X, finds nothing, and
+		/// concludes there is no log rather than that the path was wrong. So each
+		/// candidate is probed and `exists` says so.
+		///
+		/// The Editor's own log is NOT at <project>/Logs/Editor.log. That is the
+		/// *player* log location. The Editor writes to the XDG config home, so
+		/// which file is real depends on how the Editor was launched: a Hub
+		/// child inherits the Hub's sandbox XDG_CONFIG_HOME, and pi points
+		/// XDG_CONFIG_HOME at the same sandbox so the licence resolves (see
+		/// findLicensedConfigHome in launch.ts). Either way the current process
+		/// can be asked directly, which beats guessing from a path.
 		private static string GetLog()
 		{
+			Json logs = new Json();
+			logs.OpenArray();
+			AddLogCandidate(logs, EditorLogPath, "pi bridge log (C# side only; Debug.Log does not reach it)");
+			AddLogCandidate(logs, CurrentEditorLogPath(), "Unity Editor log for this process");
+			AddLogCandidate(logs, Path.Combine(ProjectRoot(), "Logs", "Editor.log"), "player log");
+			logs.CloseArray();
+
 			Json result = new Json();
 			result.OpenObject();
-			result.AddString("editorLogPath", EditorLogPath);
-			result.AddString("playerLogPath", Path.Combine(ProjectRoot(), "Logs", "Editor.log"));
+			result.AddArray("logs", logs);
 			result.CloseObject();
 			return result.ToString();
+		}
+
+		private static void AddLogCandidate(Json array, string path, string role)
+		{
+			Json entry = new Json();
+			entry.OpenObject();
+			entry.AddString("path", path ?? "");
+			entry.AddString("role", role);
+			entry.AddBool("exists", !string.IsNullOrEmpty(path) && File.Exists(path));
+			entry.CloseObject();
+			array.AddElement(entry);
+		}
+
+		/// Ask the running Editor where it writes its log, rather than deriving
+		/// it. Returns "" when this Unity version has no such API.
+		private static string CurrentEditorLogPath()
+		{
+			try
+			{
+				System.Reflection.MethodInfo method = typeof(UnityEditor.EditorApplication).GetMethod(
+					"GetCurrentLogFilePath",
+					System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+					System.Reflection.BindingFlags.Static,
+					null, Type.EmptyTypes, null);
+				if (method == null) return "";
+				return method.Invoke(null, null) as string ?? "";
+			}
+			catch (Exception)
+			{
+				return "";
+			}
 		}
 	}
 }

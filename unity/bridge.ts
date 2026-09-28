@@ -388,6 +388,20 @@ export const requestLiveUnityExportSourceModels = (options: {
 		},
 	});
 
+/**
+ * Where the Editor's logs actually are.
+ *
+ * Asked of the live Editor rather than derived from a path, because the Editor
+ * writes to the XDG config home and which file that is depends on how it was
+ * launched. The C# side probes each candidate and reports `exists`, so a caller
+ * is never handed a path that does not exist.
+ */
+export const requestLiveUnityLog = (options: { timeoutMs?: number } = {}) =>
+	requestLiveUnityBridge<import("./types.js").UnityLogResult>({
+		timeoutMs: options.timeoutMs,
+		payload: { type: "get-log" },
+	});
+
 export function listStaleResponseFiles(): string[] {
 	const { responsesDir } = getLiveBridgePaths();
 	try {

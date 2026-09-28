@@ -377,6 +377,25 @@ export interface UnityOpenSceneResult {
 	scenePath: string;
 }
 
+/**
+ * One candidate log location, probed rather than asserted.
+ *
+ * `exists` is the load-bearing field: the Editor's log is NOT at
+ * `<project>/Logs/Editor.log` (that is the *player* log), it goes to the XDG
+ * config home, and which file that is depends on whether the Editor was launched
+ * by the Hub (sandbox) or directly. Reporting a path without checking it would
+ * send a reader to a file that is not there.
+ */
+export interface UnityLogCandidate {
+	path: string;
+	role: string;
+	exists: boolean;
+}
+
+export interface UnityLogResult {
+	logs: UnityLogCandidate[];
+}
+
 export interface UnityReloadSceneResult {
 	scenePath: string;
 	discardedUnsavedChanges: boolean;

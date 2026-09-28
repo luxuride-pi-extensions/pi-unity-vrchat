@@ -35,24 +35,6 @@ namespace PiUnity
 	internal static class VrcResolve
 	{
 		private static readonly Dictionary<string, Type> typeCache = new Dictionary<string, Type>(StringComparer.Ordinal);
-		private static readonly Dictionary<string, Assembly> assemblyCache = new Dictionary<string, Assembly>(StringComparer.Ordinal);
-
-		/// An assembly, by simple name prefix. "" means every loaded assembly.
-		internal static Assembly Assembly_(string prefix)
-		{
-			if (assemblyCache.TryGetValue(prefix, out Assembly cached)) return cached;
-			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-			{
-				string name = assembly.GetName().Name ?? "";
-				if (prefix.Length == 0 || name == prefix || name.StartsWith(prefix + ".", StringComparison.Ordinal))
-				{
-					assemblyCache[prefix] = assembly;
-					return assembly;
-				}
-			}
-			assemblyCache[prefix] = null;
-			return null;
-		}
 
 		/// A public type, by full name, searched across every loaded assembly.
 		///
@@ -197,13 +179,6 @@ namespace PiUnity
 			{
 				return null;
 			}
-		}
-
-		/// True when the component lives on a prefab asset rather than a scene
-		/// instance.
-		internal static bool IsAssetComponent(Component component)
-		{
-			return AssetPathOf(component) != null;
 		}
 	}
 }
