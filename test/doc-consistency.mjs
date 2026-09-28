@@ -87,7 +87,14 @@ check(
 const MANAGER = join(REPO, "unity", "agents", "unity-manager.md");
 const managerSource = readFileSync(MANAGER, "utf8");
 check("found unity-manager.md", managerSource.length > 0);
-check("index.ts injects the manager prompt", source.includes("getManagerPrompt()"));
+// The prompt reaches the session as the `getPrompt` option of the shared
+// context-injection helper, so it is passed as a function REFERENCE and there
+// are no parentheses after the name. Both spellings are accepted: the wiring is
+// what this asserts, not the call convention the current implementation picked.
+check(
+	"index.ts injects the manager prompt",
+	/getManagerPrompt\s*(\(\s*\)|[,}])/.test(source),
+);
 
 // Whole-word only: \b would split on the underscore, so exclude a longer tool
 // name that merely starts with the one being matched.

@@ -73,9 +73,10 @@ worker's job and it is already done.
   186/237/237/109/85 bones" is a fact; "the rig looks right" is not.
 - **If a shot is inadequate, say so and say what camera would fix it.** Do not
   quietly render a second angle to avoid reporting the problem.
-- **Leave the build in a state the supervisor can revert or extend.** If you
-  used `unity_module_run`, the checkpoint exists; if you wrote outside a
-  module, name the exact paths you touched so a revert is still possible.
+- **Leave the build in a state the supervisor can revert or extend.** If the
+  work went through a module run, its checkpoint exists, so say which module;
+  if it was written outside a module, name the exact paths that were touched so
+  a revert is still possible.
 
 ## When the target is a handoff
 

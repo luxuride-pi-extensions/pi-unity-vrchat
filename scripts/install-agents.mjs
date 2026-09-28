@@ -25,6 +25,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkTemplate } from "./agent-template-checks.mjs";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXT_ROOT = resolve(HERE, "..");
 const TEMPLATES = join(EXT_ROOT, "unity", "agents");
@@ -134,6 +136,15 @@ for (const { file, extensionDir } of targets) {
 	const needsTodo = usesTodo(original);
 	const extensions = [extensionDir, ...(needsTodo && todoEntry ? [todoEntry] : [])].join(", ");
 	const stamped = original.replace(/^extensions:.*$/m, `extensions: ${extensions}`);
+
+	// The shared checks, run on the STAMPED text because that is what is
+	// installed. They guard two silent failures: a tool the prompt names but
+	// tools: omits, and a tool whose extension cannot be resolved.
+	const isResolvable = (name) => existsSync(resolveInstalledExtensionDir(name));
+	for (const problem of checkTemplate(stamped, { isResolvable })) {
+		console.error(`WARNING ${file}: ${problem}`);
+		problems += 1;
+	}
 
 	if (needsTodo && todoEntry === null) {
 		console.error(

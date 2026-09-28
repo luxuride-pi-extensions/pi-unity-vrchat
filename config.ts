@@ -18,6 +18,18 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as localCore from "./manager-core.local.js";
+import { loadManagerCoreOrLocal } from "./manager-core.js";
+
+/**
+ * The shared manager core, or this extension's own copy of it.
+ *
+ * Resolved once, at module load, because consumers call it during module
+ * evaluation: a lazy resolve would return a different core depending on when
+ * the first prompt was read. See manager-core.ts for the resolution order.
+ */
+const core = loadManagerCoreOrLocal(localCore);
+
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
 export const APP_NAME = "vibe-unity";
@@ -86,20 +98,12 @@ export function getBundledUnityAgentsDir(): string {
  * already running, so a stray `tools:` line in a system prompt is both inert
  * and misleading. A missing or unreadable file yields a string that says so,
  * because a manager that silently runs on a few lines of generic guidance is
- * worse than one that reports the prompt is gone.
+ * worse than one that reports the prompt is gone. Both halves of that -- the
+ * strip and the loud failure -- are the shared core's, and identical in the
+ * other two manager extensions.
  */
 export function getManagerPrompt(): string {
-	try {
-		const source = readFileSync(join(getUnityAssetsDir(), "agents", "unity-manager.md"), "utf8");
-		return source.replace(/^---[\s\S]*?\n---\n/, "").trim();
-	} catch (error) {
-		return (
-			"The manager prompt could not be read from unity/agents/unity-manager.md, so this " +
-			`session has no detailed manager instructions (${error instanceof Error ? error.message : String(error)}). ` +
-			"Say so plainly and ask the user to check that file exists; do not fall back to guessing at " +
-			"which agent owns which work."
-		);
-	}
+	return core.readPromptFile(join(getUnityAssetsDir(), "agents", "unity-manager.md"), "Unity manager");
 }
 
 /** Cross-process bridge queue directory, polled by the unity/plugin/ C# code. */

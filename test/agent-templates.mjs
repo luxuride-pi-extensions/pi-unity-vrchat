@@ -41,7 +41,16 @@ import { join } from "node:path";
 
 import { INSTALLED_EXTENSIONS, JITI } from "./paths.mjs";
 
-/** Tools that come from pi-subagents, the todo package, or pi's own built-ins. */
+/**
+ * Tools that come from pi-subagents, the todo package, pi's own built-ins, or
+ * an npm `packages:` entry rather than a local extension.
+ *
+ * `ask_user_question` is the third kind: it is registered by
+ * `@juicesharp/rpiv-ask-user-question` in settings.json, so the resolver below
+ * never sees a local extension providing it. It was missing here and the suite
+ * reported the two manager templates as shipping an unresolvable tool, which is
+ * the cry-wolf failure this file exists to prevent.
+ */
 const AMBIENT_TOOLS = new Set([
 	"subagent",
 	"contact_supervisor",
@@ -53,6 +62,7 @@ const AMBIENT_TOOLS = new Set([
 	"grep",
 	"find",
 	"ls",
+	"ask_user_question",
 ]);
 
 const { createJiti } = await import(JITI);

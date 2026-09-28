@@ -50,23 +50,95 @@ import {
 } from "./unity/runtime.js";
 import { ensureUnityLaunchedForce, resetUnityLaunch } from "./launch.js";
 import { getManagerPrompt } from "./config.js";
+import * as localCore from "./manager-core.local.js";
+import { loadManagerCoreOrLocal } from "./manager-core.js";
+
+/**
+ * The shared manager core, or this extension's own copy of it. See
+ * manager-core.ts for the resolution order and why it is a runtime lookup.
+ */
+const core = loadManagerCoreOrLocal(localCore);
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
 
 /**
- * The tag pi-subagents stamps into every child's system prompt.
+ * Manager mode, entered ONLY by the /unity command.
  *
- * Used to keep the volatile live-state snapshot in the session the user is
- * typing in: the snapshot describes THAT session's selection and open scene, and
- * a worker handed it would be pointed at its parent's UI state rather than at
- * the object names its own brief already named.
+ * The mechanism — the engaged flag, the tool_call gate, and the exemption for a
+ * subagent inside a manager session — is the shared core's, because all three
+ * manager extensions had a private copy of it and they drifted. The refusals
+ * are attached here as a policy callback: they name a Unity worker and a Unity
+ * critic, so they cannot live in a file that does not know about Unity.
  */
-const CHILD_AGENT_PROMPT_PATTERN = /<active_agent\s+name="[^"]*"/;
+const managerMode = core.createManagerMode({
+	onGateMessage: (event) => {
+		if (event.toolName === "write" || event.toolName === "edit") {
+			return {
+				block: true,
+				reason:
+					"Manager role: do not author files. This session IS the manager — you were not handed a job to relay — and the subagents you spawn are the ones that do the work. Authoring Unity C# is `unity-worker`'s job (or `vrchat-unity-avatar` / `vrchat-unity-world` for those projects): plan the modules, then spawn one per module with a compact brief (goal, module name, GameObject names, acceptance criteria) and read only the reports that come back. A direct approach is a dead end: your `write`/`edit` is blocked for the rest of this manager mode. If the file is unrelated to Unity — project files, a config, a script of your own — say so and ask the user to run /unity-exit, which lifts this gate.",
+			};
+		}
+		return null;
+	},
+});
 
-let unityEngaged = false;
-function markUnityEngaged(): void {
-	unityEngaged = true;
-}
+/**
+ * The per-turn injection: the constant manager prompt as a system section, and
+ * the live snapshot as a message.
+ *
+ * The ordering and the three rules are the shared core's — why a constant prompt
+ * belongs in a section, why a child must not receive the parent's snapshot, and
+ * why a failed fetch must say so loudly instead of injecting nothing. What stays
+ * here is the Unity half: the 4s budget, the state categories, and the fact
+ * that Unity has a second unavailable branch the core has no word for — a
+ * snapshot that comes back successfully but with no context in it.
+ */
+const injectUnityContext = core.createContextInjection({
+	section: "unity",
+	customType: "unity_context",
+	timeoutMs: LIVE_CONTEXT_PROMPT_TIMEOUT_MS,
+	shouldInject: () => managerMode.isEngaged(),
+	getPrompt: getManagerPrompt,
+	// Unity is slower to answer than Blender: the bridge shares the Editor's
+	// main thread with import and compile work, so it gets a wider prompt-timeout
+	// budget. The explicit withTimeout is kept as well as the core's own: this
+	// one rejects a HUNG bridge, and the core's message reports it.
+	fetchState: (ctx) => withTimeout(unitySessionContext({ cwd: (ctx as { cwd: string }).cwd }), LIVE_CONTEXT_PROMPT_TIMEOUT_MS),
+	formatState: (live) => {
+		const result = live as Awaited<ReturnType<typeof unitySessionContext>>;
+		const context = result.context;
+		// A snapshot with no context in it is not a failure the core can see:
+		// the call resolved, and the shape is an absent field. The agent used to
+		// read an empty string as "nothing to inject" and then assume it knew
+		// the selection, so the unavailable notice is built here instead.
+		return context
+			? [
+					"Authoritative live Unity state for this turn:",
+					`- project: ${context.projectPath}`,
+					`- unity: ${context.unityVersion}${context.isCompiling ? " (COMPILING)" : ""}${context.isPlaying ? " (PLAY MODE)" : ""}`,
+					`- open scene: ${context.scene.name} (${context.scene.isLoaded ? "loaded" : "not loaded"})`,
+					`- available scenes: ${context.scene.availableScenes.join(", ") || "(none)"}`,
+					`- selection: ${context.selection.count > 0 ? context.selection.gameObjects.join(", ") : "(nothing selected)"}`,
+					`- active object: ${context.selection.activeGameObject || "(none)"}`,
+					`- active transform tool: ${context.tools.activeTransformTool}`,
+					`- scene view: ${context.viewport.hasSceneView ? `${context.viewport.perspective ?? "?"} (camera ${context.viewport.cameraName ?? "?"})` : "NOT VISIBLE"}`,
+					result.note,
+				]
+					.filter((line) => line.length > 0)
+					.join("\n")
+			: [
+					"Live Unity state is UNAVAILABLE for this turn.",
+					"Do NOT assume any selection, active object, open scene, or camera state from earlier turns.",
+					`${result.note}`,
+					"Call `unity_session_context` before mutating anything, and ask the user if it also fails.",
+				].join("\n");
+	},
+	// "open scene" is not one of the core's four defaults, so the list of what
+	// must not be assumed is stated per app rather than fixed in the core.
+	assumeNothingAbout: "selection, active object, open scene, or camera state",
+	failureGuidance: () => "Call `unity_session_context` before mutating anything, and ask the user if it also fails.",
+});
 
 function formatJsonResult(value: unknown): string {
 	return JSON.stringify(value, null, 2);
@@ -129,7 +201,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityWorkspaceInit({
 				workspacePath: normalizeWorkspacePath(ctx.cwd, params.workspace),
 				template: params.template as "3d" | "blank" | undefined,
@@ -179,7 +251,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityExecuteCSharp({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -208,7 +280,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: params.workspace });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
@@ -234,7 +306,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await getSceneInfo({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -277,7 +349,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnityBones({
 				gameObject: params.gameObject,
 				bones: params.bones,
@@ -324,7 +396,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const names = params.gameObjectNames ?? [];
 			const result =
 				params.mode === "export"
@@ -360,7 +432,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnityInspect({
 				gameObject: params.gameObject,
 				component: params.component,
@@ -397,7 +469,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnitySetProperty({
 				gameObject: params.gameObject,
 				component: params.component,
@@ -434,7 +506,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnitySetTransform({
 				gameObject: params.gameObject,
 				position: params.position,
@@ -486,7 +558,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnityVrc({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -544,7 +616,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await requestLiveUnityWorld({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -574,7 +646,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const workspacePath = normalizeWorkspacePath(ctx.cwd, params.workspace);
 			await assertCameraExists(workspacePath, params.cameraName);
 			const result = await unitySaveView({
@@ -610,7 +682,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityRender({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -647,7 +719,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityCaptureView({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -688,7 +760,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityModuleRun({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -728,7 +800,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityModuleRevert({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -751,7 +823,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unitySetTool({ tool: params.tool });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
@@ -785,7 +857,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = unityLogCritique({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -816,7 +888,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// Engagement is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the session engaged and the guidance injected.
-			markUnityEngaged();
+			managerMode.markEngaged();
 			const result = await unityBridgeStatus();
 			const details = { ...result, requestedWorkspace: params.workspace };
 			return { content: [{ type: "text", text: formatJsonResult(details) }], details };
@@ -830,101 +902,38 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 	// Engagement is per-session: a fresh session must not inherit the
 	// guidance-injection flag from a previous one.
 	pi.on("session_start", () => {
-		unityEngaged = false;
+		managerMode.reset();
 	});
 
-	pi.registerCommand("unity", {
-		description: "Send a Unity task — everything after /unity is the prompt",
-		handler: async (args, ctx) => {
-			const task = args.trim();
-			if (!task) {
-				ctx.ui.notify("Usage: /unity <what to build or change in Unity>", "info");
-				return;
-			}
-			unityEngaged = true;
+	// The command registration, the argument handling and the deliverAs choice
+	// are the shared core's: all three manager extensions send the user's text
+	// the same way, and a `steer` sent into a non-idle session can interleave
+	// ahead of queued work. What stays here is the launch, which is Unity's.
+	core.registerEngageCommand(pi, {
+		name: "unity",
+		usage: "<what to build or change in Unity>",
+		engagedMessage: "Unity engaged — this session is the manager.",
+		onEngage: () => {
+			managerMode.markEngaged();
 			// Force-launch so a project opened and closed moments ago is relaunched
 			// rather than treated as already-alive. No project is known here, so a
 			// workspace_init call still has to happen before the bridge can serve
 			// anything; the launch is best-effort by design.
 			resetUnityLaunch();
 			ensureUnityLaunchedForce();
-			ctx.ui.notify("Unity engaged — this session is the manager.", "info");
-			pi.sendUserMessage(task, { deliverAs: ctx.isIdle() ? undefined : "steer" });
 		},
 	});
 
-	pi.on("before_agent_start", (event, ctx) => {
-		// Only inject when engaged: the user ran /unity, or a unity_* tool was
-		// already used. Injection alone never spawns the Editor.
-		if (!unityEngaged) return undefined;
-
-		// The manager's own prompt is the WHOLE of its instructions now. There
-		// is no separate router blob, because there is no router: this session is
-		// the manager, and everything it needs to know belongs in one place.
-		//
-		// It is constant, so it belongs in the system prompt as its own section
-		// rather than in a message appended after the user prompt. Pi diffs
-		// system sections per run and emits an update only when a section actually
-		// changes, so this costs nothing on steady-state turns and never lands
-		// after the user's message.
-		event.systemPromptOptions.sections.unity = getManagerPrompt();
-
-		// Subagents get the constant prompt but not the live snapshot: the
-		// snapshot describes the PARENT session's selection and scene, which would
-		// point a worker at state its brief already named. Detected from the
-		// <active_agent> tag the subagent prompt runtime stamps into the child.
-		if (CHILD_AGENT_PROMPT_PATTERN.test(event.systemPrompt)) return undefined;
-
-		return (async () => {
-			let liveContextPrompt = "";
-			try {
-				// Unity is slower to answer than Blender: the bridge shares the
-				// Editor's main thread with import and compile work, so it gets a
-				// wider prompt-timeout budget. If even that fails, say the state is
-				// unknown instead of leaving an empty string, which the agent used
-				// to read as "nothing to inject" and then assume it knew the
-				// selection.
-				const live = await withTimeout(
-					unitySessionContext({ cwd: ctx.cwd }),
-					LIVE_CONTEXT_PROMPT_TIMEOUT_MS,
-				);
-				const context = live.context;
-				liveContextPrompt = context
-					? [
-							"Authoritative live Unity state for this turn:",
-							`- project: ${context.projectPath}`,
-							`- unity: ${context.unityVersion}${context.isCompiling ? " (COMPILING)" : ""}${context.isPlaying ? " (PLAY MODE)" : ""}`,
-							`- open scene: ${context.scene.name} (${context.scene.isLoaded ? "loaded" : "not loaded"})`,
-							`- available scenes: ${context.scene.availableScenes.join(", ") || "(none)"}`,
-							`- selection: ${context.selection.count > 0 ? context.selection.gameObjects.join(", ") : "(nothing selected)"}`,
-							`- active object: ${context.selection.activeGameObject || "(none)"}`,
-							`- active transform tool: ${context.tools.activeTransformTool}`,
-							`- scene view: ${context.viewport.hasSceneView ? `${context.viewport.perspective ?? "?"} (camera ${context.viewport.cameraName ?? "?"})` : "NOT VISIBLE"}`,
-							live.note,
-						]
-							.filter((line) => line.length > 0)
-							.join("\n")
-					: [
-							"Live Unity state is UNAVAILABLE for this turn.",
-							"Do NOT assume any selection, active object, open scene, or camera state from earlier turns.",
-							`${live.note}`,
-							"Call `unity_session_context` before mutating anything, and ask the user if it also fails.",
-						].join("\n");
-			} catch (error) {
-				liveContextPrompt = [
-					`Live Unity state is UNAVAILABLE for this turn (the bridge did not answer within ${LIVE_CONTEXT_PROMPT_TIMEOUT_MS} ms: ${error instanceof Error ? error.message : String(error)}).`,
-					"Do NOT assume any selection, active object, open scene, or camera state from earlier turns.",
-					"Call `unity_session_context` before mutating anything, and ask the user if it also fails.",
-				].join("\n");
-			}
-
-			return {
-				message: {
-					customType: "unity_context",
-					content: liveContextPrompt,
-					display: true,
-				},
-			};
-		})();
+	// /unity-exit lifts the gate without ending the session or touching the
+	// project, because the gate otherwise lasts until /new.
+	core.registerExitCommand(pi, {
+		name: "unity-exit",
+		description: "Leave Unity manager mode — lift the write/edit gate (keeps the session and the project)",
+		onExit: () => managerMode.clearGate(),
+		notEngagedMessage: "Not in Unity manager mode — nothing to exit.",
+		exitedMessage:
+			"Left Unity manager mode. The unity_* tools, /unity and the skills are still available; run /unity to re-enter.",
 	});
+
+	pi.on("before_agent_start", injectUnityContext);
 }
