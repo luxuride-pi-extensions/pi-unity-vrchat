@@ -20,7 +20,7 @@
  *   PI_TODO_ENTRY   default $PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,15 +78,21 @@ function usesTodo(source) {
 const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
-// (pi-unity-blender/agents/) because it is a SIBLING top-level agent rather
-// than a Unity subagent: /unity enters `unity-manager` from this repo and
-// /unity-blender enters `unity-blender-manager` from the binder, and neither
-// spawns the other. It also needs BOTH extensions on its `extensions:` line.
-// The binder's own scripts/install-agents.mjs installs it, and having two
-// installers race over one destination file is a worse failure than a file
-// nobody owns.
+// (pi-unity-blender/agents/) because it is a SIBLING top-level prompt rather
+// than a Unity subagent: /unity enters the manager prompt from this repo and
+// /unity-blender enters the binder's, and neither spawns the other. It also
+// needs BOTH extensions on its `extensions:` line. The binder's own
+// scripts/install-agents.mjs installs it, and having two installers race over
+// one destination file is a worse failure than a file nobody owns.
+//
+// unity-manager.md is also NOT listed, for a different reason: it is a PROMPT
+// read at runtime by getManagerPrompt() in config.ts, because the /unity
+// command session IS the manager. `retired` below deletes an already-installed
+// copy, because an add-only installer would leave a fully spawnable, fully
+// stale shadow manager in place forever.
+const retired = ["unity-manager.md"];
+
 const targets = [
-	{ file: "unity-manager.md", extensionDir: VIBE_UNITY },
 	{ file: "unity-worker.md", extensionDir: VIBE_UNITY },
 	{ file: "unity-critic.md", extensionDir: VIBE_UNITY },
 	{ file: "unity-diagnostician.md", extensionDir: VIBE_UNITY },
@@ -96,7 +102,7 @@ const targets = [
 	// Reads reference images with `read` and needs no extension tool, so it
 	// declares no `extensions:` line. The stamp is a no-op on it, but the
 	// installer still has to own the copy: a template that is in
-	// `unity-manager`'s allowedAgents and in no repo is a spawn target that
+	// the manager prompt's allowedAgents and in no repo is a spawn target that
 	// vanishes the next time this list is edited without it.
 	{ file: "unity-reference-describer.md", extensionDir: VIBE_UNITY },
 ];
@@ -151,6 +157,17 @@ for (const { file, extensionDir } of targets) {
 		console.log(`wrote ${destination}  (extensions: ${extensions})`);
 	} else {
 		console.log(`${file} -> ${destination}\n  extensions: ${extensions}`);
+	}
+}
+
+for (const file of retired) {
+	const destination = join(agentDir, file);
+	if (!existsSync(destination)) continue;
+	if (write) {
+		unlinkSync(destination);
+		console.log(`retired ${destination}`);
+	} else {
+		console.log(`retired ${destination}  (still installed; re-run with --write)`);
 	}
 }
 

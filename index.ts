@@ -2,15 +2,21 @@
  * pi extension: Unity integration.
  *
  * Registers 19 unity_* tools + bundled skills, the /unity slash command, and
- * injects Unity workflow guidance + live Editor state before turns that engage
+ * injects the manager prompt + live Editor state before turns that engage
  * the extension.
+ *
+ * The /unity command session IS the manager: there is no manager subagent, so
+ * the user watches the build's todos and progress in the session they typed the
+ * command into. The manager prompt lives in unity/agents/unity-manager.md and
+ * is read at runtime (config.ts getManagerPrompt) rather than installed as a
+ * spawnable agent, so a second, drifting copy cannot exist.
  *
  * The Unity Editor is NOT launched at pi/session start, and unlike Blender it
  * cannot be launched to answer a question alone: the bridge is a compiled C#
  * editor plugin (unity/plugin/) that is copied into a workspace's
  * Assets/Editor/ folder, so the first request against a project costs an editor
- * boot plus a compile. The guidance injected below is what keeps that cost from
- * turning into a sequence of blind timeouts.
+ * boot plus a compile. The live-state block injected below is what keeps that
+ * cost from turning into a sequence of blind timeouts.
  */
 
 import { Type } from "typebox";
@@ -43,17 +49,19 @@ import {
 	UNITY_TOOLS,
 } from "./unity/runtime.js";
 import { ensureUnityLaunchedForce, resetUnityLaunch } from "./launch.js";
-
-const UNITY_ROUTER_GUIDANCE = [
-	"You are operating inside pi-vibe-unity with Unity-native tools available.",
-	"You are the /unity ROUTER, not the builder: the top level of this hierarchy is the `unity-manager` subagent, and it owns a whole build. Your job is to call subagents_enable (no arguments) once, spawn `unity-manager` with the user's task made self-contained (goal, project or workspace, acceptance criteria, anything you already know), let it run, and relay what it returns. Do not plan modules, write C#, or drive unity_* tools one at a time as if you were building: the build does not belong in your context, and for a single trivial tweak the manager is still cheaper than a half-built scene you have to unpick.",
-	"Read only the report `unity-manager` returns. Never read the module sources it ran.",
-	"You need none of the rest of this guidance. The roster and what each agent is for, the C# entry-point contract, the bridge cold-start behaviour, the inspector and bone addressing rules, the render-vs-capture distinction, the module checkpoint scope and the loop all live in the manager's OWN prompt, which is longer and more precise than anything reconstructed here — and a spawned manager does not inherit this session's prompt, so that is where those facts have to be. Do not re-derive them here, and do not paraphrase them into a brief: the manager already holds them.",
-	"For a task that also crosses between the two applications, `/unity-blender` is the command: it reaches `unity-blender-manager`, which holds both toolchains and the transfer boundary. Do not route a transfer through here.",
-	"Do not restate tool schemas in prose. Use the tool definitions directly.",
-].join(" ");
+import { getManagerPrompt } from "./config.js";
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
+
+/**
+ * The tag pi-subagents stamps into every child's system prompt.
+ *
+ * Used to keep the volatile live-state snapshot in the session the user is
+ * typing in: the snapshot describes THAT session's selection and open scene, and
+ * a worker handed it would be pointed at its parent's UI state rather than at
+ * the object names its own brief already named.
+ */
+const CHILD_AGENT_PROMPT_PATTERN = /<active_agent\s+name="[^"]*"/;
 
 let unityEngaged = false;
 function markUnityEngaged(): void {
@@ -840,15 +848,32 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			// anything; the launch is best-effort by design.
 			resetUnityLaunch();
 			ensureUnityLaunchedForce();
-			ctx.ui.notify("Unity engaged — routing task to the agent.", "info");
+			ctx.ui.notify("Unity engaged — this session is the manager.", "info");
 			pi.sendUserMessage(task, { deliverAs: ctx.isIdle() ? undefined : "steer" });
 		},
 	});
 
-	pi.on("before_agent_start", (_event, ctx) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		// Only inject when engaged: the user ran /unity, or a unity_* tool was
 		// already used. Injection alone never spawns the Editor.
 		if (!unityEngaged) return undefined;
+
+		// The manager's own prompt is the WHOLE of its instructions now. There
+		// is no separate router blob, because there is no router: this session is
+		// the manager, and everything it needs to know belongs in one place.
+		//
+		// It is constant, so it belongs in the system prompt as its own section
+		// rather than in a message appended after the user prompt. Pi diffs
+		// system sections per run and emits an update only when a section actually
+		// changes, so this costs nothing on steady-state turns and never lands
+		// after the user's message.
+		event.systemPromptOptions.sections.unity = getManagerPrompt();
+
+		// Subagents get the constant prompt but not the live snapshot: the
+		// snapshot describes the PARENT session's selection and scene, which would
+		// point a worker at state its brief already named. Detected from the
+		// <active_agent> tag the subagent prompt runtime stamps into the child.
+		if (CHILD_AGENT_PROMPT_PATTERN.test(event.systemPrompt)) return undefined;
 
 		return (async () => {
 			let liveContextPrompt = "";
@@ -896,7 +921,7 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 			return {
 				message: {
 					customType: "unity_context",
-					content: [UNITY_ROUTER_GUIDANCE, liveContextPrompt].filter((part) => part.length > 0).join("\n\n"),
+					content: liveContextPrompt,
 					display: true,
 				},
 			};

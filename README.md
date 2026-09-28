@@ -90,11 +90,10 @@ Unity window.
 
 ### Agent templates
 
-Seven agent templates ship in `unity/agents/`:
+Six agent templates ship in `unity/agents/`, and one more file is a prompt rather than a template:
 
 | Agent | Role | Has |
 | --- | --- | --- |
-| `unity-manager` | **top level of a Unity build, entered from `/unity`**: plans it, delegates, tracks the plan in `todo` | `subagent`, no write/edit |
 | `unity-worker` | authors and runs one `modules/<name>/script.cs` | write/edit |
 | `unity-critic` | judges how a render LOOKS against the brief, scores it | vision, read-only |
 | `unity-diagnostician` | measures live state, returns ranked fixes with exact values | read-only, no vision |
@@ -102,15 +101,22 @@ Seven agent templates ship in `unity/agents/`:
 | `vrchat-unity-avatar` | avatar packages: blendshapes, physbones, VRCFury, upload budget | write/edit |
 | `vrchat-unity-world` | world packages: light volumes, Udon, scene descriptor, bake reality | write/edit |
 
-`unity-manager` and `blender-manager` (in the Blender repo) are the two
-top-level agents of their own sides, each entered from its own command
-(`/unity`, `/blender`); the session that runs the command is a thin router that
-launches the manager and relays its report, so a build never runs in the
-router's context. The manager gates itself the way `blender-manager` does: no
-`write` or `edit` tool, `acceptanceRole: read-only`, and an `allowedAgents`
-list.
+`unity/agents/unity-manager.md` is the eighth file and is **not a template**.
+It is a PROMPT, read at runtime by `getManagerPrompt()` in `config.ts` and
+injected as a system-prompt section when `/unity` is entered. The `/unity`
+command session IS the manager: there is no manager subagent and no router hop,
+so the build's task list and progress are visible in the session the user typed
+the command into, rather than inside a child they would have to open to watch.
+Installing the file would leave a spawnable `unity-manager` whose prompt drifts
+from the one the user is actually watching, so `install-agents.mjs` excludes it
+and deletes any already-installed copy.
 
-`unity-blender-manager` is a **sibling top-level agent**, not a parent of
+`unity-manager` and `blender-manager` (in the Blender repo) are the two
+top-level PROMPTS of their own sides, each entered from its own command
+(`/unity`, `/blender`). Each gates itself the way a manager must: no `write` or
+`edit` tool, `acceptanceRole: read-only`, and an `allowedAgents` list.
+
+`unity-blender-manager` is a **sibling top-level prompt**, not a parent of
 `unity-manager`: `/unity-blender` enters it from the binder repo, it holds both
 toolchains and the transfer boundary, and it spawns the Unity and Blender
 subagents directly. A task that only touches Unity goes through `/unity`; a

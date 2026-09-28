@@ -77,15 +77,42 @@ async function loadExtension(spec) {
 	const mod = await jiti.import(spec.file, { default: true });
 	await (mod.default ?? mod)(pi);
 
-	const find = (name) => events.find((e) => e.event === name)?.handler;
-	return { tools, commands, beforeAgentStart: find("before_agent_start"), sessionStart: find("session_start") };
+	const findAll = (name) => events.filter((e) => e.event === name).map((e) => e.handler);
+	return { tools, commands, beforeAgentStarts: findAll("before_agent_start"), sessionStart: findAll("session_start")[0] };
 }
 
-// pi-vibe-unity's before_agent_start returns a Promise (it awaits a live
-// context fetch), while the binder's returns a plain object. Normalise both.
+/**
+ * Run every before_agent_start handler against one realistic event, and report
+ * the first message any of them returned.
+ *
+ * Two details the previous version got wrong, both of which hid a real crash:
+ *
+ *   - It passed `{}` as the event. A handler that injects a system-prompt
+ *     section writes to `event.systemPromptOptions.sections`, so the bare
+ *     object made that a TypeError instead of an assertion failure. The event
+ *     now carries the mutable options and the systemPrompt string the handlers
+ *     actually read, and the sections a handler writes are returned alongside
+ *     the message so the injection is observable.
+ *
+ *   - It kept only the FIRST handler for an event name. pi dispatches to every
+ *     registered handler in order, and these extensions register more than one
+ *     (the binder injects its per-turn context message and, separately, its
+ *     manager prompt), so taking the first tested a handler that may not be the
+ *     one under change and skipped the others entirely.
+ *
+ * pi-vibe-unity's handler returns a Promise (it awaits a live context fetch),
+ * while the binder's returns a plain object, so the results are awaited
+ * together. Later handlers must observe earlier mutations, so the event is
+ * shared rather than rebuilt per handler.
+ */
 async function injected(pi) {
-	const result = pi.beforeAgentStart({}, {});
-	return (await result) ?? undefined;
+	const event = { systemPrompt: "", systemPromptOptions: { sections: {} } };
+	let message;
+	for (const handler of pi.beforeAgentStarts) {
+		const result = await handler(event, { getSystemPrompt: () => event.systemPrompt });
+		if (result?.message !== undefined && message === undefined) message = result.message;
+	}
+	return { message, sections: event.systemPromptOptions.sections };
 }
 
 for (const spec of EXTENSIONS) {
@@ -96,29 +123,49 @@ for (const spec of EXTENSIONS) {
 	// Registration is the precondition for every behaviour below.
 	check(`registers /${spec.command}`, commands.has(spec.command));
 	check(`registers ${spec.tool}`, tools.some((t) => t.name === spec.tool));
-	check("has a before_agent_start handler", typeof pi.beforeAgentStart === "function");
+	check("has a before_agent_start handler", pi.beforeAgentStarts.length > 0);
 	check("has a session_start handler", typeof sessionStart === "function");
+
+	// Silence means BOTH halves quiet: no returned message AND no system-prompt
+	// section written. A handler that injects a section returns undefined, so
+	// testing only the message would report a fresh session as silent while it
+	// was in fact being handed a manager prompt.
+	const silentResult = async (pi) => {
+		const { message, sections } = await injected(pi);
+		return message === undefined && Object.keys(sections).length === 0;
+	};
 
 	// A fresh session injects nothing, and stays quiet across idle turns.
 	sessionStart?.();
-	check("fresh session: no injection", (await injected(pi)) === undefined);
-	check("idle turn: still no injection", (await injected(pi)) === undefined);
+	check("fresh session: no injection", await silentResult(pi));
+	check("idle turn: still no injection", await silentResult(pi));
 
 	// The slash command turns it on. Both take a task argument: /unity with no
 	// argument just prints usage and dispatches nothing, so there is no turn to
 	// inject into and the flag stays unset -- which is why this passes a task.
 	await commands.get(spec.command)?.handler(spec.task, commandContext());
 	const afterCommand = await injected(pi);
-	check("after slash command: injects", afterCommand?.message !== undefined);
+	check("after slash command: injects", afterCommand.message !== undefined);
 	check(
 		"injected guidance is substantial",
-		typeof afterCommand?.message?.content === "string" && afterCommand.message.content.length > 50,
-		`${afterCommand?.message?.content?.length ?? 0} chars`,
+		typeof afterCommand.message?.content === "string" && afterCommand.message.content.length > 50,
+		`${afterCommand.message?.content?.length ?? 0} chars`,
+	);
+	// The manager prompt travels as a system-prompt section, not as a message:
+	// it is constant, so pi diffs it per run and never re-sends it on steady
+	// turns. Asserting only the message would let the prompt go missing without
+	// a single failure.
+	const sectionNames = Object.keys(afterCommand.sections);
+	check("after slash command: injects a system-prompt section", sectionNames.length > 0, sectionNames.join(", "));
+	check(
+		"injected section is substantial",
+		sectionNames.some((name) => typeof afterCommand.sections[name] === "string" && afterCommand.sections[name].length > 50),
+		sectionNames.map((name) => `${name}=${afterCommand.sections[name]?.length ?? 0}`).join(", "),
 	);
 
 	// A new session silences it again -- that is the "not in fresh session" part.
 	sessionStart?.();
-	check("new session: silent again", (await injected(pi)) === undefined);
+	check("new session: silent again", await silentResult(pi));
 
 	// EVERY tool must engage, not just one. Checking a single tool is what let
 	// unity_log_critique ship without markUnityEngaged(): 18 of 19 tools engaged
@@ -134,7 +181,9 @@ for (const spec of EXTENSIONS) {
 			// A tool may legitimately fail with no editor or workspace; the
 			// engagement flag is set before any work, so a throw is fine.
 		}
-		if ((await injected(pi))?.message === undefined) silent.push(tool.name);
+		if (await silentResult(pi)) continue;
+		const engaged = await injected(pi);
+		if (engaged.message === undefined) silent.push(tool.name);
 	}
 	check(
 		`every one of ${tools.length} tools engages the session`,
@@ -143,7 +192,7 @@ for (const spec of EXTENSIONS) {
 	);
 
 	// Engagement survives idle turns once any tool has fired.
-	check("stays engaged on later turns", (await injected(pi))?.message !== undefined);
+	check("stays engaged on later turns", (await silentResult(pi)) === false);
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

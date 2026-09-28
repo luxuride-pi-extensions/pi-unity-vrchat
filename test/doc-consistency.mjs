@@ -78,35 +78,31 @@ check(
 	`registered but absent from the README table: ${registeredNotDocumented.join(", ")}`,
 );
 
-// --- injected guidance vs what is actually registered --------------------
-// The guidance a session is given is now the ROUTER's: it names one agent and
-// one command, because the manager owns everything else. The tool-convention
-// facts moved into unity-manager.md, which a spawned manager actually reads —
-// so the scan has to cover both places or it stops proving anything.
-const guidanceStart = source.indexOf("const UNITY_ROUTER_GUIDANCE");
-check("found UNITY_ROUTER_GUIDANCE in index.ts", guidanceStart !== -1);
-const guidance = guidanceStart === -1 ? "" : source.slice(guidanceStart, source.indexOf('].join(" ")', guidanceStart));
-
+// --- the manager prompt vs what is actually registered -------------------
+// There is no separate guidance blob any more: the /unity command session IS
+// the manager, and its entire prompt is unity-manager.md, read at runtime by
+// getManagerPrompt() in config.ts. So the manager file is now the only place
+// that can advise a tool, and it is the only place this needs to scan -- which
+// is also why a tool named there but not registered is now reachable at all.
 const MANAGER = join(REPO, "unity", "agents", "unity-manager.md");
 const managerSource = readFileSync(MANAGER, "utf8");
 check("found unity-manager.md", managerSource.length > 0);
+check("index.ts injects the manager prompt", source.includes("getManagerPrompt()"));
 
 // Whole-word only: \b would split on the underscore, so exclude a longer tool
 // name that merely starts with the one being matched.
-const mentioned = new Set(
-	[...`${guidance}\n${managerSource}`.matchAll(/(?<![\w])unity_[a-z_]+/g)].map((m) => m[0]),
-);
+const mentioned = new Set([...managerSource.matchAll(/(?<![\w])unity_[a-z_]+/g)].map((m) => m[0]));
 const advisedButMissing = [...mentioned].filter((name) => !registered.has(name));
 check(
-	"every tool named in the injected guidance is registered",
+	"every tool named in the manager prompt is registered",
 	advisedButMissing.length === 0,
-	`guidance advises calling: ${advisedButMissing.join(", ")}`,
+	`the prompt advises calling: ${advisedButMissing.join(", ")}`,
 );
-check("the guidance actually names some tools", mentioned.size > 0, `found ${mentioned.size}`);
+check("the prompt actually names some tools", mentioned.size > 0, `found ${mentioned.size}`);
 
-// --- the render/capture distinction survives the split -------------------
-// It is the most consequential instruction in the block, and a tool that does
-// not exist makes the instruction impossible to follow. It now lives in the
+// --- the render/capture distinction survives -----------------------------
+// It is the most consequential instruction in the prompt, and a tool that does
+// not exist makes the instruction impossible to follow. It lives in the
 // manager, which is the session that briefs a worker to render.
 check(
 	"unity-manager distinguishes unity_render from unity_capture_view",
