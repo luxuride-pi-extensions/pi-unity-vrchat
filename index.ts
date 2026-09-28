@@ -71,6 +71,32 @@ const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
  * critic, so they cannot live in a file that does not know about Unity.
  */
 const managerMode = core.createManagerMode({
+	allowedTools: [
+		// Delegation and supervision: without these the manager cannot do the
+		// one thing its prompt tells it to do.
+		"subagent",
+		"subagents_enable",
+		"contact_supervisor",
+		// Planning and reading agent definitions to write a brief with.
+		"todo",
+		"read",
+		"grep",
+		"find",
+		"ls",
+		"ask_user_question",
+		// Unity inspection. Read-only: the manager may look, not author.
+		"unity_workspace_init",
+		"unity_scene_info",
+		"unity_session_context",
+		"unity_bridge_status",
+		"unity_bones",
+		"unity_inspect",
+		"unity_vrc",
+		"unity_world",
+		"unity_source_models",
+		"unity_module_revert",
+		"unity_log_critique",
+	],
 	onGateMessage: (event) => {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			return {
@@ -904,6 +930,14 @@ export default function piVibeUnityExtension(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		managerMode.reset();
 	});
+
+	// The gate itself. This line was MISSING while the extension already
+	// carried the refusals, the allowlist and a /unity-exit that advertises
+	// lifting the gate — so the policy was written and never installed, and
+	// nothing in this repo tested for it. See pi-manager-core's
+	// test/extension-registration.mjs, which now checks that every manager
+	// actually registers a tool_call handler.
+	managerMode.install(pi);
 
 	// The command registration, the argument handling and the deliverAs choice
 	// are the shared core's: all three manager extensions send the user's text
