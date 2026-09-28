@@ -79,14 +79,22 @@ check(
 );
 
 // --- injected guidance vs what is actually registered --------------------
-const guidanceStart = source.indexOf("const UNITY_WORKFLOW_GUIDANCE");
-check("found UNITY_WORKFLOW_GUIDANCE in index.ts", guidanceStart !== -1);
+// The guidance a session is given is now the ROUTER's: it names one agent and
+// one command, because the manager owns everything else. The tool-convention
+// facts moved into unity-manager.md, which a spawned manager actually reads —
+// so the scan has to cover both places or it stops proving anything.
+const guidanceStart = source.indexOf("const UNITY_ROUTER_GUIDANCE");
+check("found UNITY_ROUTER_GUIDANCE in index.ts", guidanceStart !== -1);
 const guidance = guidanceStart === -1 ? "" : source.slice(guidanceStart, source.indexOf('].join(" ")', guidanceStart));
+
+const MANAGER = join(REPO, "unity", "agents", "unity-manager.md");
+const managerSource = readFileSync(MANAGER, "utf8");
+check("found unity-manager.md", managerSource.length > 0);
 
 // Whole-word only: \b would split on the underscore, so exclude a longer tool
 // name that merely starts with the one being matched.
 const mentioned = new Set(
-	[...guidance.matchAll(/(?<![\w])unity_[a-z_]+/g)].map((m) => m[0]),
+	[...`${guidance}\n${managerSource}`.matchAll(/(?<![\w])unity_[a-z_]+/g)].map((m) => m[0]),
 );
 const advisedButMissing = [...mentioned].filter((name) => !registered.has(name));
 check(
@@ -96,12 +104,13 @@ check(
 );
 check("the guidance actually names some tools", mentioned.size > 0, `found ${mentioned.size}`);
 
-// --- the guidance keeps the render/capture distinction -------------------
+// --- the render/capture distinction survives the split -------------------
 // It is the most consequential instruction in the block, and a tool that does
-// not exist makes the instruction impossible to follow.
+// not exist makes the instruction impossible to follow. It now lives in the
+// manager, which is the session that briefs a worker to render.
 check(
-	"guidance distinguishes unity_render from unity_capture_view",
-	guidance.includes("unity_render") && guidance.includes("unity_capture_view"),
+	"unity-manager distinguishes unity_render from unity_capture_view",
+	managerSource.includes("unity_render") && managerSource.includes("unity_capture_view"),
 );
 check(
 	"both render tools are registered",

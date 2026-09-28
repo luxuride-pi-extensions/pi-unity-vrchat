@@ -93,6 +93,12 @@ const targets = [
 	{ file: "unity-finalizer.md", extensionDir: VIBE_UNITY },
 	{ file: "vrchat-unity-avatar.md", extensionDir: VIBE_UNITY },
 	{ file: "vrchat-unity-world.md", extensionDir: VIBE_UNITY },
+	// Reads reference images with `read` and needs no extension tool, so it
+	// declares no `extensions:` line. The stamp is a no-op on it, but the
+	// installer still has to own the copy: a template that is in
+	// `unity-manager`'s allowedAgents and in no repo is a spawn target that
+	// vanishes the next time this list is edited without it.
+	{ file: "unity-reference-describer.md", extensionDir: VIBE_UNITY },
 ];
 
 const write = process.argv.includes("--write");
