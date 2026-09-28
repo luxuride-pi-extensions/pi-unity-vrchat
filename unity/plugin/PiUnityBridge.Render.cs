@@ -116,9 +116,17 @@ namespace PiUnity
 			string tool = (request.GetString("tool") ?? "").ToLowerInvariant();
 			if (!SetTransformTool(tool))
 			{
-				throw new Exception(
-					"Unknown transform tool \"" + tool + "\". Use move, rotate, scale, or rect."
-				);
+				// Two different failures share this path, and the user needs to be
+				// able to tell them apart: a name we do not know, versus a Unity
+				// build whose tool API moved. Reporting the first as the second
+				// is what made this read as "move is not a tool".
+				bool known = tool == "move" || tool == "rotate" || tool == "scale" || tool == "rect";
+				string reason = GetEditorToolsType() == null
+					? "This Unity build does not expose UnityEditor.EditorTools.EditorTools, so the transform tool cannot be driven from a script."
+					: known
+						? "This Unity build did not accept the tool; the tool type could not be resolved."
+						: "Unknown transform tool \"" + tool + "\". Use move, rotate, scale, or rect.";
+				throw new Exception(reason);
 			}
 			Tools.hidden = tool == "rect";
 

@@ -90,7 +90,7 @@ Unity window.
 
 ### Agent templates
 
-Six agent templates ship in `unity/agents/`:
+Seven agent templates ship in `unity/agents/`:
 
 | Agent | Role | Has |
 | --- | --- | --- |

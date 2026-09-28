@@ -7,7 +7,7 @@
 	"license": "MIT",
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node test/run-bridge-tests.mjs && node test/engagement-test.mjs && node test/doc-consistency.mjs",
+		"test": "node test/run-bridge-tests.mjs && node test/engagement-test.mjs && node test/doc-consistency.mjs && node test/agent-templates.mjs",
 		"test:plugin": "bash test/compile-plugin.sh"
 	},
 	"devDependencies": {

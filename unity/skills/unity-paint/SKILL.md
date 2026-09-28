@@ -10,11 +10,17 @@ paint, weight paint, face paint, sculpting, blendshape work, or skinning
 setup in a Unity project.
 
 Core idea: Unity's paint and UV tools are **interactive UI state**, not
-scriptable operations. There is no `bpy`-style API here. So **write the result as
-project data through C#** — `Texture2D` assets, `Mesh.uv*`, `Mesh.colors`,
-`Mesh.AddBlendShapeFrame`, `BoneWeight` — then switch the live viewport into
-the matching paint mode with `unity_set_mode` so the user sees the right
-workspace and can refine by hand.
+scriptable operations. Reflected over UnityEditor and UnityEngine on 2022.3 and
+there is no API for it: no `UnityEditor.PaintMode` enum, no mesh-paint type, and
+`UnityEditorInternal.EditMode` exposes only `SceneViewEditMode` (None, Collider,
+Cloth, GridPainting) plus an `ownerID`. So **write the result as project data
+through C#** — `Texture2D` assets, `Mesh.uv*`, `Mesh.colors`,
+`Mesh.AddBlendShapeFrame`, `BoneWeight` — and then **tell the user which mode to
+switch to by hand**, because you cannot switch it for them.
+
+Do not promise a mode switch and then silently not do it. The one thing pi can
+change in the Editor's tools is the transform tool (`unity_set_tool`: move,
+rotate, scale, rect), and that is a different thing entirely.
 
 ## Workflow
 
@@ -121,31 +127,32 @@ vertex displacement in the viewport. Do not fake it with a code-generated
 displacement unless the user asked for a procedural shape, and say which one
 you did.
 
-## Viewport modes
+## Tell the user which mode to switch to
 
-The worker, as its last step, leaves the Editor in the mode the user asked for:
+Paint modes cannot be set from script on 2022.3 (see the premise above), so the
+last step of a paint job is a sentence, not a tool call. Say which mode the user
+should select, and what will be visible when they do:
 
-| Request | `unity_set_mode` mode |
-| --- | --- |
-| texture paint | `TEXTURE_PAINT` |
-| vertex paint | `VERTEX_PAINT` |
-| weight paint | `WEIGHT_PAINT` |
-| face paint | `FACE_PAINT` |
-| sculpt | `SCULPT` |
-| UV work | `UV` (enters edit mode with the UV editor overlay on) |
-| mesh editing generally | `EDIT_MESH` |
-| posing / rigging | `POSE` (needs an ARMATURE object) |
-| rig structure editing | `EDIT_ARMATURE` |
+| The user asked for | They switch to | What they then see |
+| --- | --- | --- |
+| texture paint | Texture Paint | the texture in the inspector, brushable |
+| vertex paint | Vertex Paint | per-vertex colour on the mesh |
+| weight paint | Weight Paint | bone weights, but only meaningful if the mesh's `BoneWeight[]` order matches the renderer's `bones` — interactive weight painting is a user job |
+| face paint | Face Paint | per-face selection in edit mode |
+| sculpt | Sculpt | the sculpt brush; there is no scriptable brush, so code cannot stroke it |
+| UV work | UV | edit mode with the UV editor, to inspect what you wrote |
+| posing / rigging | Pose | the rig, if an ARMATURE object is active |
+| rig structure editing | Armature Edit | the bone structure |
 
-Pass `objectName` when the target is not the active object. Paint modes require
-a MESH; `POSE` and `EDIT_ARMATURE` require an ARMATURE. The tool returns a
-clear error otherwise — that is the tool working, not a failure to route
-around.
+Name the object too, when it is not the only candidate. And say plainly if the
+result is already complete without them touching a brush — a script that wrote
+the UVs does not need a human to lay them out again, and inviting pointless
+manual work is its own kind of waste.
 
 ## Rules
 
-- **Do not simulate interactive brush strokes.** Write data, set the mode, let
-  the user refine.
+- **Do not simulate interactive brush strokes.** Write the data, say which
+  mode to switch to, and let the user refine.
 - **Create or verify the target before writing into it.** A missing texture
   asset, a zero-length UV array, or an absent submesh is the most common cause
   of a paint operation that reports success and does nothing.

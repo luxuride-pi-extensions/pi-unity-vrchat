@@ -1,7 +1,7 @@
 ---
 name: unity-finalizer
 description: Unity finalizer — one-shot cleanup for a finished build: selects the hero view, saves a view, captures final renders from the angles the brief needs, runs the honest completeness check for the target platform, and reports what is still not done. Use once, at the end, after the critic has accepted the work.
-tools: read, grep, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_set_tool, unity_set_mode, unity_save_view, unity_render, unity_capture_view, unity_vrc, unity_world, unity_source_models, unity_log_critique, unity_execute_csharp, contact_supervisor
+tools: read, grep, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_set_tool, unity_save_view, unity_render, unity_capture_view, unity_vrc, unity_world, unity_source_models, unity_log_critique, unity_execute_csharp, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at
@@ -51,9 +51,14 @@ worker's job and it is already done.
 4. **Log one `unity_log_critique` entry** for the state you are handing over.
    Fill `viewAdequacy` truthfully: if the framing does not show what matters,
    say so rather than scoring the work on a view that cannot show it.
-5. **Restore the Editor** to the mode and selection the user expects —
-   `unity_set_mode` back to `OBJECT`, a sensible active object — and report
-   anything you left selected or left unsaved.
+5. **Leave the build as you found it where you can.** `unity_set_tool` is the
+   one Editor tool pi can actually change — record the active transform tool
+   before your renders and put it back afterwards. Everything else (object
+   mode, paint mode, selection) is not scriptable on 2022.3: reflect over
+   UnityEditor and there is no paint-mode API at all, and
+   `UnityEditorInternal.EditMode` exposes only scene-level edit modes. So
+   **tell the user what to switch back to by hand** rather than implying you
+   did it, and report anything you left selected or left unsaved.
 
 ## The honesty rules that make this role worth spawning
 

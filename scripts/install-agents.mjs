@@ -17,6 +17,7 @@
  * Overrides:
  *   PI_HOME         default ~/.pi
  *   PI_AGENT_DIR    default $PI_HOME/agent
+ *   PI_TODO_ENTRY   default $PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,6 +45,36 @@ function resolveInstalledExtensionDir(name) {
 	return installed;
 }
 
+const TODO_PACKAGE = "@juicesharp/rpiv-todo";
+
+/**
+ * The todo tool is provided by a SEPARATE extension, and a foreground child does
+ * not load ambient parent extensions. So a template that names `todo` in its
+ * `tools:` list must also list the todo package on its `extensions:` line, or
+ * the child is handed a `todo` it can never call. blender-manager documents this
+ * in its own frontmatter for the same reason, and its installer resolves the
+ * package the same way.
+ */
+function resolveTodoEntry() {
+	const override = process.env.PI_TODO_ENTRY?.trim();
+	if (override) return override;
+	const candidate = join(PI_AGENT_DIR, "npm", "node_modules", TODO_PACKAGE, "index.ts");
+	return existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * Whether a template needs the todo provider, read from the template's OWN
+ * `tools:` line rather than from a hardcoded flag here. The flag was a second
+ * source of truth that could disagree with the template: a manager could name
+ * `todo` and not be given a provider, or be given one it never calls.
+ */
+function usesTodo(source) {
+	const line = /^tools:.*$/m.exec(source)?.[0] ?? "";
+	return line
+		.split(",")
+		.some((tool) => tool.trim() === "todo");
+}
+
 const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
@@ -63,6 +94,7 @@ const targets = [
 
 const write = process.argv.includes("--write");
 const agentDir = join(PI_AGENT_DIR, "agents");
+const todoEntry = resolveTodoEntry();
 let problems = 0;
 
 for (const { file, extensionDir } of targets) {
@@ -83,18 +115,33 @@ for (const { file, extensionDir } of targets) {
 
 	// Replace the placeholder rather than a literal path, so a template
 	// installed on this machine never claims to be installed on another.
-	const stamped = readFileSync(source, "utf8").replace(
-		/^extensions:.*$/m,
-		`extensions: ${extensionDir}`,
-	);
+	const original = readFileSync(source, "utf8");
+	const needsTodo = usesTodo(original);
+	const extensions = [extensionDir, ...(needsTodo && todoEntry ? [todoEntry] : [])].join(", ");
+	const stamped = original.replace(/^extensions:.*$/m, `extensions: ${extensions}`);
+
+	if (needsTodo && todoEntry === null) {
+		console.error(
+			`WARNING ${file}: names \`todo\` in tools: but ${TODO_PACKAGE} was not found, so the installed ` +
+				`agent receives a todo it can never call. Set PI_TODO_ENTRY to the package entry point.`,
+		);
+		problems += 1;
+	}
+
+	// A surviving placeholder means the file has more than one `extensions:`
+	// line and the stamp hit the wrong one.
+	if (stamped.includes("__PI_")) {
+		console.error(`WARNING ${file}: a placeholder survived substitution; more than one extensions: line?`);
+		problems += 1;
+	}
 
 	const destination = join(agentDir, file);
 	if (write) {
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(destination, stamped);
-		console.log(`wrote ${destination}  (extensions: ${extensionDir})`);
+		console.log(`wrote ${destination}  (extensions: ${extensions})`);
 	} else {
-		console.log(`${file} -> ${destination}\n  extensions: ${extensionDir}`);
+		console.log(`${file} -> ${destination}\n  extensions: ${extensions}`);
 	}
 }
 

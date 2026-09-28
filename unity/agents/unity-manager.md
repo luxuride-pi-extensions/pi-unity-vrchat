@@ -4,9 +4,16 @@ description: Unity manager — plans a whole Unity build and delegates it to wor
 tools: subagent, read, todo, grep, find, ls, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
-# committed and correct on two machines. The placeholder below is substituted at
-# install time by `node scripts/install-agents.mjs --write`.
-extensions: __PI_AGENT_EXTENSION_DIR__
+# committed and correct on two machines. Both placeholders below are substituted
+# at install time by `node scripts/install-agents.mjs --write`.
+#
+# The todo package is listed because this template names `todo` in `tools:`. A
+# foreground child does not load ambient parent extensions, so a tool named here
+# that no listed extension registers is requested and NEVER PROVIDED -- the child
+# is handed a `todo` it can never call, with no error anywhere. `todo` is what
+# keeps a long build's plan from drifting, so it is worth carrying its provider
+# explicitly. pi-vibe-blender's blender-manager has the same two-entry line.
+extensions: __PI_AGENT_EXTENSION_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
 allowedAgents: unity-worker, unity-critic, unity-diagnostician, unity-finalizer, vrchat-unity-avatar, vrchat-unity-world
 acceptanceRole: read-only

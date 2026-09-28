@@ -27,13 +27,7 @@ namespace PiUnity
 		{
 			try
 			{
-				Type toolsType = typeof(Editor).Assembly.GetType("UnityEditor.EditorTools");
-				PropertyInfo property = toolsType?.GetProperty(
-					"activeTool",
-					BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
-				);
-				object value = property?.GetValue(null, null);
-				return value == null ? "" : value.GetType().Name;
+				return GetActiveTransformToolName();
 			}
 			catch (Exception)
 			{
@@ -85,36 +79,64 @@ namespace PiUnity
 			return found;
 		}
 
-		/// EditorTools.transformTool and the TransformTool enum are both internal
-		/// to UnityEditor, so naming them directly does not compile (CS0103 /
-		/// CS0122). Reflection is the documented way to drive the transform
-		/// tool from a script; the enum is resolved by name from the same
-		/// assembly, so a Unity upgrade that renames a member fails loudly here
-		/// instead of silently doing nothing.
+		/// The transform tool lives on `UnityEditor.EditorTools.EditorTools`, a
+		/// TYPE that sits INSIDE a namespace of the same name.
+		///
+		/// Getting this wrong is silent and total. An earlier version asked for
+		/// `typeof(Editor).Assembly.GetType("UnityEditor.EditorTools")`, which
+		/// looks like it should work and returns null: the name resolves to the
+		/// NAMESPACE, not to a type. So SetTransformTool returned false for every
+		/// input and `unity_set_tool { tool: "move" }` answered `Unknown
+		/// transform tool "move". Use move, rotate, scale, or rect.` -- the tool
+		/// rejected its own documented input, on a code path that still compiled
+		/// clean and looked correct while reading. It is also not recoverable
+		/// with non-public binding, because GetTypes() does not contain a type of
+		/// that name either.
+		///
+		/// Reflection is still required: the type is public but lives in a
+		/// `UnityEditor.EditorTools` namespace that the predefined editor
+		/// assembly cannot be assumed to reference, and naming it directly would
+		/// add that coupling to every project the plugin is dropped into.
+		private static Type GetEditorToolsType()
+		{
+			return typeof(Editor).Assembly.GetType("UnityEditor.EditorTools.EditorTools");
+		}
+
+		/// SetTransformTool drives the tool through `SetActiveTool(Type)`, taking
+		/// the tool's TYPE rather than an enum value. There is no public setter on
+		/// `activeToolType` (attempting one throws "Set Method not found"), and
+		/// the legacy `EditorTools.transformTool` enum property that earlier
+		/// versions targeted does not exist on 2022.3 either.
 		private static bool SetTransformTool(string tool)
 		{
-			Type toolsType = typeof(Editor).Assembly.GetType("UnityEditor.EditorTools");
+			Type toolsType = GetEditorToolsType();
 			if (toolsType == null) return false;
-			PropertyInfo property = toolsType.GetProperty(
-				"transformTool",
-				BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+			MethodInfo setActive = toolsType.GetMethod(
+				"SetActiveTool",
+				BindingFlags.Public | BindingFlags.Static,
+				null,
+				new[] { typeof(Type) },
+				null
 			);
-			Type enumType = toolsType.GetProperty("transformTool", BindingFlags.NonPublic | BindingFlags.Static)?.PropertyType;
-			if (property == null || enumType == null) return false;
+			if (setActive == null) return false;
 
-			// rect is a Unity 2023.1+ alias for the scale tool; on 2022 LTS the
-			// rect tool is the legacy Rect not in the enum, so map it to Scale
-			// and let Tools.hidden carry the distinct visual behaviour.
-			string enumName = tool switch
+			// Resolved by name so a Unity upgrade that renames a tool fails loudly
+			// here instead of silently doing nothing.
+			string typeName = tool switch
 			{
-				"move" => "Move",
-				"rotate" => "Rotate",
-				"scale" => "Scale",
-				"rect" => "Scale",
+				"move" => "UnityEditor.MoveTool",
+				"rotate" => "UnityEditor.RotateTool",
+				"scale" => "UnityEditor.ScaleTool",
+				// RectTool DOES exist on 2022.3 -- an earlier version mapped
+				// rect onto Scale on the belief that the rect tool was 2023.1+.
+				"rect" => "UnityEditor.RectTool",
 				_ => "",
 			};
-			if (enumName.Length == 0) return false;
-			property.SetValue(null, Enum.Parse(enumType, enumName), null);
+			if (typeName.Length == 0) return false;
+
+			Type toolType = typeof(Editor).Assembly.GetType(typeName);
+			if (toolType == null) return false;
+			setActive.Invoke(null, new object[] { toolType });
 			return true;
 		}
 
@@ -122,9 +144,9 @@ namespace PiUnity
 		{
 			try
 			{
-				Type toolsType = typeof(Editor).Assembly.GetType("UnityEditor.EditorTools");
+				Type toolsType = GetEditorToolsType();
 				PropertyInfo property = toolsType?.GetProperty(
-					"transformTool",
+					"activeToolType",
 					BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
 				);
 				object value = property?.GetValue(null, null);
