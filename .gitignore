@@ -1,0 +1,53 @@
+# pi-vibe-unity — a TypeScript pi extension that ships a Unity Editor plugin and a
+# Unity project template. It is NOT itself a Unity project, so this deliberately
+# does NOT use Unity's stock .gitignore. Two rules in that file would break this
+# repo if copied:
+#
+#   /[Ll]ibrary/   there is no Library, but the pattern is broad
+#   /[Pp]ackages/  WOULD SILENTLY DROP unity/project-template/Packages/manifest.json,
+#                  which the generated template needs to resolve its packages.
+#
+# Anything under unity/project-template/ is source, including the hand-written
+# scene, and is tracked in full.
+
+node_modules/
+
+# Runtime state written by the extension into a project or workspace.
+# These land in a USER's Unity project, not here, but they can appear under this
+# tree when a workspace is created inside the checkout.
+unity-workspace.json
+.manifest.lock
+script.cs
+critique.log
+iteration_*/
+modules/*/runs/
+modules/*/render.png
+references/
+*.manifest.lock
+
+# Bridge scratch. The bridge dir is a XDG cache path, but an override
+# (PI_UNITY_BRIDGE_DIR) could point it inside the tree.
+.bridge/
+bridge/
+*.tmp
+heartbeat
+*.lock
+
+# Compiled output. The plugin is compiled by Unity into the user's project, never
+# here, so any .dll/.exe in this tree is an accident.
+*.dll
+*.exe
+*.pdb
+*.mdb
+
+# Test scratch
+test/.tmp/
+*.log
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

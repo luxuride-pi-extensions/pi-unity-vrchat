@@ -1,0 +1,208 @@
+/**
+ * Creating or adopting a Unity workspace.
+ *
+ * Two paths, because the user asked for both:
+ *   - generate: copy the bundled template (a real, openable 3D project with a
+ *     Main Camera + Directional Light scene) and point a manifest at it.
+ *   - adopt:    the user points pi at an existing project (a configured VRChat
+ *     world, a game in progress). pi does NOT generate anything; it installs
+ *     only the bridge plugin plus the manifest, so a real project is never
+ *     scaffolded over.
+ *
+ * In both cases the scene is created by *Unity* on first open, not by pi. pi
+ * never hand-writes scene YAML into a project it did not generate: a subtly
+ * wrong .unity file fails to deserialize and looks like data loss to the user.
+ */
+
+import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+import { getUnityBridgeDir, getUnityProjectTemplateDir } from "../config.js";
+import { requestLiveUnityOpenScene } from "./bridge.js";
+import { LIVE_BRIDGE_INIT_TIMEOUT_MS } from "./utils.js";
+import {
+	createWorkspaceId,
+	DEFAULT_SCENE_NAME,
+	fileExists,
+	getManifestPath,
+	installBridgeIntoProject,
+	nowIso,
+	readManifest,
+	MANIFEST_VERSION,
+	type UnityWorkspaceManifest,
+} from "./workspace.js";
+
+export type UnityTemplate = "3d" | "blank";
+
+/** A directory counts as a Unity project if it has Assets/ and ProjectSettings/. */
+export function looksLikeUnityProject(path: string): boolean {
+	return existsSync(join(path, "Assets")) && existsSync(join(path, "ProjectSettings"));
+}
+
+export interface WorkspaceInitOptions {
+	workspacePath: string;
+	template?: UnityTemplate;
+	sourceProject?: string;
+	continueExisting?: boolean;
+}
+
+export interface WorkspaceInitResult {
+	workspacePath: string;
+	created: boolean;
+	adopted: boolean;
+	scenePath: string;
+	manifestPath: string;
+	projectReady: boolean;
+	message: string;
+}
+
+function writeFreshManifest(
+	workspacePath: string,
+	options: { adopted: boolean; sourceProject?: string },
+): UnityWorkspaceManifest {
+	const manifest: UnityWorkspaceManifest = {
+		version: MANIFEST_VERSION,
+		id: createWorkspaceId(),
+		projectPath: workspacePath,
+		// Filled in for real once Unity has generated the project; the
+		// documented default keeps the manifest well-formed in the meantime.
+		scenePath: join("Assets", "Scenes", DEFAULT_SCENE_NAME),
+		createdAt: nowIso(),
+		updatedAt: nowIso(),
+		latestIteration: 0,
+		moduleRuns: [],
+		savedViews: [],
+		renderOutputs: [],
+		adopted: options.adopted,
+	};
+	writeFileSync(getManifestPath(workspacePath), `${JSON.stringify(manifest, undefined, 2)}\n`, "utf8");
+	return manifest;
+}
+
+export function ensureWorkspaceInitialized(options: WorkspaceInitOptions): WorkspaceInitResult {
+	const workspacePath = resolve(options.workspacePath);
+	const manifestPath = getManifestPath(workspacePath);
+
+	if (fileExists(manifestPath)) {
+		const manifest = readManifest(manifestPath);
+		return {
+			workspacePath,
+			created: false,
+			adopted: manifest.adopted,
+			scenePath: manifest.scenePath,
+			manifestPath,
+			projectReady: looksLikeUnityProject(workspacePath),
+			message: `Workspace already exists (adopted: ${manifest.adopted}). Reusing it.`,
+		};
+	}
+
+	if (options.continueExisting) {
+		throw new Error(`Workspace does not exist: ${workspacePath}`);
+	}
+
+	if (existsSync(workspacePath)) {
+		const entries = readdirSync(workspacePath);
+		// An empty dir is fine to adopt; a populated one that is not a Unity
+		// project is almost certainly a mistake worth stopping for.
+		if (entries.length > 0 && !looksLikeUnityProject(workspacePath)) {
+			throw new Error(
+				`${workspacePath} already contains files but is not a Unity project (no Assets/ + ProjectSettings/). ` +
+					`Point pi at an existing Unity project directory, or choose an empty workspace path.`,
+			);
+		}
+	}
+
+	mkdirSync(workspacePath, { recursive: true });
+
+	let adopted = false;
+	let message: string;
+
+	if (options.sourceProject) {
+		const source = resolve(options.sourceProject);
+		if (!looksLikeUnityProject(source)) {
+			throw new Error(
+				`--source-project must be a Unity project directory (containing Assets/ and ProjectSettings/): ${source}`,
+			);
+		}
+		if (source === workspacePath) {
+			adopted = true;
+			message = `Adopting the existing Unity project in place: ${source}. Only the bridge plugin and manifest are added.`;
+		} else {
+			// Copy the project so pi's work never mutates the user's real one.
+			cpSync(source, workspacePath, { recursive: true });
+			adopted = true;
+			message = `Copied the existing Unity project from ${source}. Edit the copy, not the original.`;
+		}
+	} else {
+		const template = options.template ?? "3d";
+		if (template !== "3d" && template !== "blank") {
+			throw new Error(`Unsupported Unity template: ${template}. Use "3d" or "blank".`);
+		}
+		if (template === "3d") {
+			const templateDir = getUnityProjectTemplateDir();
+			if (!existsSync(templateDir)) {
+				throw new Error(`Bundled Unity project template is missing: ${templateDir}`);
+			}
+			cpSync(templateDir, workspacePath, { recursive: true });
+			message = "Generated a new 3D Unity project from the bundled template.";
+		} else {
+			mkdirSync(join(workspacePath, "Assets"), { recursive: true });
+			mkdirSync(join(workspacePath, "ProjectSettings"), { recursive: true });
+			message = "Generated a blank Unity project (no scene yet; Unity creates one on first open).";
+		}
+	}
+
+	// Installing the bridge is what makes the project pi-managed. It is
+	// refreshed on every init so an older plugin never survives an upgrade.
+	installBridgeIntoProject(workspacePath, getUnityBridgeDir());
+	const manifest = writeFreshManifest(workspacePath, { adopted });
+
+	return {
+		workspacePath,
+		created: true,
+		adopted,
+		scenePath: manifest.scenePath,
+		manifestPath,
+		projectReady: looksLikeUnityProject(workspacePath),
+		message,
+	};
+}
+
+/**
+ * Opens the workspace's scene in the live Editor.
+ *
+ * Failures are reported as a message rather than thrown: a fresh project has
+ * no scene until Unity generates one, and that is not an error the caller can
+ * do anything about by retrying harder.
+ */
+export async function openWorkspaceInLiveUnity(
+	result: WorkspaceInitResult,
+): Promise<{ openedInLiveUnity: boolean; liveUnityMessage: string }> {
+	try {
+		await requestLiveUnityOpenScene(result.scenePath);
+		return { openedInLiveUnity: true, liveUnityMessage: "" };
+	} catch (error) {
+		return {
+			openedInLiveUnity: false,
+			liveUnityMessage:
+				`The project is initialized but the scene is not open in Unity yet. ` +
+				`Open ${result.workspacePath} in the Unity Editor (it will generate its first scene and compile the pi bridge plugin, which takes a minute). ` +
+				`Bridge said: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+/**
+ * The tool-facing entry point: initialize, then try to surface the scene in the
+ * live Editor. Never throws on the live half — a project that has never been
+ * opened is a normal intermediate state, not a failure to report as an error.
+ */
+export async function unityWorkspaceInit(
+	options: WorkspaceInitOptions,
+): Promise<WorkspaceInitResult & { openedInLiveUnity: boolean; liveUnityMessage: string }> {
+	const result = ensureWorkspaceInitialized(options);
+	const live = await openWorkspaceInLiveUnity(result);
+	return { ...result, ...live };
+}
+
+export { LIVE_BRIDGE_INIT_TIMEOUT_MS };

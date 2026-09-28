@@ -1,0 +1,19 @@
+{
+	"name": "pi-vibe-unity",
+	"version": "0.1.0",
+	"description": "pi extension: live Unity Editor integration (C# editor bridge, project workspaces, render, scene inspection) for stock pi",
+	"private": true,
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "node test/run-bridge-tests.mjs && node test/engagement-test.mjs",
+		"test:plugin": "bash test/compile-plugin.sh"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "^0.87.1",
+		"@types/node": "^22.0.0",
+		"typebox": "^1.3.27",
+		"typescript": "^5.6.0"
+	}
+}
