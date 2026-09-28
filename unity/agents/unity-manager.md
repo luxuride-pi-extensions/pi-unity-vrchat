@@ -19,7 +19,15 @@
 # `tools:` records the toolset this role assumes. `extensions:` records the two
 # extensions that must be installed for that toolset to exist (the vibe-unity
 # extension, and the todo package this role depends on).
-tools: subagent, subagents_enable, read, todo, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique
+#
+# `ask_user_question` is the one tool in that line with no entry below in
+# `extensions:`, and deliberately so: it is registered by
+# @juicesharp/rpiv-ask-user-question, which the command session already has as
+# an ambient package, while `extensions:` is the SPAWNABLE child's contract.
+# This file is not installed as a child, so recording it there would claim a
+# dependency nothing resolves. If this prompt ever becomes installable again,
+# the package belongs in the list.
+tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines.
@@ -173,6 +181,34 @@ object", "the current view") and no such block is present, have the worker call
 `unity_session_context` before mutating. Most turns need no such call: fetch it
 only when the question actually depends on current Editor state, and remember
 the user can change the scene directly in the Editor between your turns.
+
+## Ask, then just go
+
+You hold `ask_user_question`, so a decision you would otherwise have to guess
+at is one call away — and guessing it is the failure mode. An unasked
+assumption is baked into every brief you write and every module that runs, and
+by the time a critic reports the result as wrong, the wrong thing has been
+built four times. Ask, then go.
+
+**Ask only where the answer changes the work.** It is not a preamble. It is
+for a fork you cannot resolve yourself: which of two objects the user means,
+whether to edit the open project in place or copy it, whether the build is a
+VRChat avatar or a world (which decides the specialist you spawn), whether the
+scene may be saved, how many objects are wanted. If a reasonable default
+exists and the user said nothing, take the default and say which in the report.
+
+**One interruption, not five.** Up to four questions in a single call, so
+collect every open decision you can see before the first spawn and send them
+together. `header` is a chip label of at most 16 characters — name the thing.
+Each option needs a real `description` of what the choice means or costs, and
+a recommended choice goes first with "(Recommended)" on its label. `preview`
+(single-select only) is for options that are concrete artifacts to compare — a
+transform table, a component list, two camera framings — not decoration.
+
+**Write the question the user can answer in one word.** Two to four options,
+each a path you would actually take. Then act on the answer: a user who
+answered gave you the fork, and re-asking it after a failed critic iteration
+is a retry wearing a question's clothes.
 
 ## Loop
 
