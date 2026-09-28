@@ -90,11 +90,28 @@ Unity window.
 
 ### Agent templates
 
-`unity-worker` and `unity-critic` are **not** loaded from this checkout. An agent
-template's `extensions:` field must be an absolute path, and pi-subagents
-resolves only `.`/`..` segments in it — never `~`, never an env var. So the
-committed templates carry the placeholder `__PI_AGENT_EXTENSION_DIR__` and a
-script stamps it at install time:
+Six agent templates ship in `unity/agents/`:
+
+| Agent | Role | Has |
+| --- | --- | --- |
+| `unity-manager` | plans a whole build, delegates, tracks the plan in `todo` | `subagent`, no write/edit |
+| `unity-worker` | authors and runs one `modules/<name>/script.cs` | write/edit |
+| `unity-critic` | judges how a render LOOKS against the brief, scores it | vision, read-only |
+| `unity-diagnostician` | measures live state, returns ranked fixes with exact values | read-only, no vision |
+| `unity-finalizer` | one-shot handoff: views, renders, honest completeness check | write, vision |
+| `vrchat-unity-avatar` | avatar packages: blendshapes, physbones, VRCFury, upload budget | write/edit |
+| `vrchat-unity-world` | world packages: light volumes, Udon, scene descriptor, bake reality | write/edit |
+
+The manager gates itself the way `blender-manager` does: no `write` or `edit`
+tool, `acceptanceRole: read-only`, and an `allowedAgents` list. It cannot spawn
+`unity-blender-manager` — that agent is the ROOT of a cross-application task,
+and it lives in the binder repo. Spawn it directly instead.
+
+**None of them are loaded from this checkout.** An agent template's
+`extensions:` field must be an absolute path, and pi-subagents resolves only
+`.`/`..` segments in it — never `~`, never an env var. So the committed
+templates carry the placeholder `__PI_AGENT_EXTENSION_DIR__` and a script stamps
+it at install time:
 
 ```bash
 node scripts/install-agents.mjs            # dry run: print resolved paths
@@ -106,6 +123,21 @@ The script warns if the extension is not installed under
 loads with **no tools at all** and fails in a way that looks like a bug in the
 agent rather than a missing extension. `resources_discover` cannot register
 agents, so copying them is mandatory, not optional.
+
+The Unity-Blender manager is installed by the **binder's** own
+`scripts/install-agents.mjs`, not this one. It needs both extensions on its
+`extensions:` line, and two installers racing over one destination file is a
+worse failure than a file nobody owns.
+
+### Skills
+
+Eight skills in `unity/skills/`, published through the `resources_discover`
+hook: `unity-create`, `unity-edit`, `unity-analyze`, `unity-live-state`,
+`unity-csharp`, `unity-modules`, `unity-with-reference`, and `unity-paint`
+(textures, UVs, vertex colours, blendshapes, and the honest limits of weight
+paint — the mesh's `BoneWeight[]` must match the renderer's bone order, so
+interactive weight painting is a user job). The binder ships one more,
+`unity-blender-transfer`.
 
 ## Development
 

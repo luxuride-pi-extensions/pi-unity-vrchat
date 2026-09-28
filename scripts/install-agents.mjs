@@ -44,9 +44,21 @@ function resolveInstalledExtensionDir(name) {
 	return installed;
 }
 
+const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
+
+// The Unity-Blender manager is NOT listed here. It lives in the binder repo
+// (pi-unity-blender/agents/) because it is the root of the pair, not a Unity
+// subagent, and it needs BOTH extensions on its `extensions:` line. The binder's
+// own scripts/install-agents.mjs installs it, and having two installers race
+// over one destination file is a worse failure than a file nobody owns.
 const targets = [
-	{ file: "unity-worker.md", extensionDir: resolveInstalledExtensionDir("vibe-unity") },
-	{ file: "unity-critic.md", extensionDir: resolveInstalledExtensionDir("vibe-unity") },
+	{ file: "unity-manager.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-worker.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-critic.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-diagnostician.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-finalizer.md", extensionDir: VIBE_UNITY },
+	{ file: "vrchat-unity-avatar.md", extensionDir: VIBE_UNITY },
+	{ file: "vrchat-unity-world.md", extensionDir: VIBE_UNITY },
 ];
 
 const write = process.argv.includes("--write");
