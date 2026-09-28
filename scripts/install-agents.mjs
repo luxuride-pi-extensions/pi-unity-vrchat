@@ -78,10 +78,13 @@ function usesTodo(source) {
 const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
-// (pi-unity-blender/agents/) because it is the root of the pair, not a Unity
-// subagent, and it needs BOTH extensions on its `extensions:` line. The binder's
-// own scripts/install-agents.mjs installs it, and having two installers race
-// over one destination file is a worse failure than a file nobody owns.
+// (pi-unity-blender/agents/) because it is a SIBLING top-level agent rather
+// than a Unity subagent: /unity enters `unity-manager` from this repo and
+// /unity-blender enters `unity-blender-manager` from the binder, and neither
+// spawns the other. It also needs BOTH extensions on its `extensions:` line.
+// The binder's own scripts/install-agents.mjs installs it, and having two
+// installers race over one destination file is a worse failure than a file
+// nobody owns.
 const targets = [
 	{ file: "unity-manager.md", extensionDir: VIBE_UNITY },
 	{ file: "unity-worker.md", extensionDir: VIBE_UNITY },

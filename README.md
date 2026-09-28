@@ -94,7 +94,7 @@ Seven agent templates ship in `unity/agents/`:
 
 | Agent | Role | Has |
 | --- | --- | --- |
-| `unity-manager` | plans a whole build, delegates, tracks the plan in `todo` | `subagent`, no write/edit |
+| `unity-manager` | **top level of a Unity build, entered from `/unity`**: plans it, delegates, tracks the plan in `todo` | `subagent`, no write/edit |
 | `unity-worker` | authors and runs one `modules/<name>/script.cs` | write/edit |
 | `unity-critic` | judges how a render LOOKS against the brief, scores it | vision, read-only |
 | `unity-diagnostician` | measures live state, returns ranked fixes with exact values | read-only, no vision |
@@ -102,10 +102,19 @@ Seven agent templates ship in `unity/agents/`:
 | `vrchat-unity-avatar` | avatar packages: blendshapes, physbones, VRCFury, upload budget | write/edit |
 | `vrchat-unity-world` | world packages: light volumes, Udon, scene descriptor, bake reality | write/edit |
 
-The manager gates itself the way `blender-manager` does: no `write` or `edit`
-tool, `acceptanceRole: read-only`, and an `allowedAgents` list. It cannot spawn
-`unity-blender-manager` — that agent is the ROOT of a cross-application task,
-and it lives in the binder repo. Spawn it directly instead.
+`unity-manager` and `blender-manager` (in the Blender repo) are the two
+top-level agents of their own sides, each entered from its own command
+(`/unity`, `/blender`); the session that runs the command is a thin router that
+launches the manager and relays its report, so a build never runs in the
+router's context. The manager gates itself the way `blender-manager` does: no
+`write` or `edit` tool, `acceptanceRole: read-only`, and an `allowedAgents`
+list.
+
+`unity-blender-manager` is a **sibling top-level agent**, not a parent of
+`unity-manager`: `/unity-blender` enters it from the binder repo, it holds both
+toolchains and the transfer boundary, and it spawns the Unity and Blender
+subagents directly. A task that only touches Unity goes through `/unity`; a
+task that crosses between the two applications goes through `/unity-blender`.
 
 **None of them are loaded from this checkout.** An agent template's
 `extensions:` field must be an absolute path, and pi-subagents resolves only
