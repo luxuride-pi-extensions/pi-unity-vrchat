@@ -276,6 +276,14 @@ export async function unityModuleRevert(options: ModuleRevertOptions): Promise<M
 	copyFileSync(target.checkpointPath, sceneFile);
 
 	// Prune from on-disk state, not the snapshot taken before the copy.
+	//
+	// Only the MANIFEST is pruned. The run directories under
+	// modules/<name>/runs/NN/ are deliberately left on disk: the checkpoint has
+	// already been copied to the scene file by this point, but it is the only
+	// way back if this revert turns out to have restored the wrong state, and
+	// unity_module_revert can target an earlier iteration precisely because
+	// those checkpoints survive. The manifest is the source of truth for what
+	// is revertible; a leftover directory is inert, not misleading.
 	await updateManifest(getManifestPath(workspacePath), (state) => {
 		state.moduleRuns = state.moduleRuns.filter((run) => run.sequence < target.sequence);
 	});
