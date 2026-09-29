@@ -191,7 +191,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 	});
 }
 
-export default function piVibeUnityExtension(pi: ExtensionAPI) {
+export default function piUnityExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "unity_workspace_init",
 		label: "Unity Workspace Init",

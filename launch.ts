@@ -181,7 +181,7 @@ function armUnityWatchdog(): void {
 }
 
 export async function ensureUnityLaunchedForce(projectPath?: string): Promise<void> {
-	if (process.env.VIBE_UNITY_NO_UNITY?.trim() === "1") return;
+	if (process.env.PI_UNITY_NO_UI?.trim() === "1") return;
 	if (isLiveBridgeAlive()) return;
 	if (unityLaunchStarted && !unitySpawnInFlight) return;
 

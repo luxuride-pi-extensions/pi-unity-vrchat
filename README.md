@@ -67,7 +67,7 @@ Two things the installer cannot do for you:
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root. |
 | `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Request/response queue shared with the C# plugin. |
 | `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/pi-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
-| `VIBE_UNITY_NO_UNITY` | unset | `1` opts out of auto-launching the Editor. |
+| `PI_UNITY_NO_UI` | unset | `1` opts out of auto-launching the Editor. |
 | `XDG_CONFIG_HOME` | auto | **Read, not set** — see below. Only consulted when it is unset. |
 
 Editor resolution order: `$UNITY_PATH` → macOS `/Applications/Unity/Hub/Editor`

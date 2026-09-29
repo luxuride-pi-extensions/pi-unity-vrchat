@@ -125,8 +125,8 @@ const PROVIDER_DIRS = ["pi-unity", "pi-blender", "unity-blender"];
  * it resolves to nothing here and the todo checks below cover it instead.
  */
 const PLACEHOLDER_OWNERS = new Map([
-	["__PI_VIBE_UNITY_DIR__", "pi-unity"],
-	["__PI_VIBE_BLENDER_DIR__", "pi-blender"],
+	["__PI_PI_UNITY_EXT_DIR__", "pi-unity"],
+	["__PI_BLENDER_DIR__", "pi-blender"],
 ]);
 
 /**

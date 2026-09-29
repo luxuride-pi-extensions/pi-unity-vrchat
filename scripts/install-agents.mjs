@@ -73,7 +73,7 @@ function resolveTodoEntry() {
  * starts happening again.
  */
 
-const VIBE_UNITY = resolveInstalledExtensionDir("pi-unity");
+const PI_UNITY_EXT = resolveInstalledExtensionDir("pi-unity");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
 // (pi-unity-blender/agents/) because it is a SIBLING top-level prompt rather
@@ -91,18 +91,18 @@ const VIBE_UNITY = resolveInstalledExtensionDir("pi-unity");
 const retired = ["unity-manager.md"];
 
 const targets = [
-	{ file: "unity-worker.md", extensionDir: VIBE_UNITY },
-	{ file: "unity-critic.md", extensionDir: VIBE_UNITY },
-	{ file: "unity-diagnostician.md", extensionDir: VIBE_UNITY },
-	{ file: "unity-finalizer.md", extensionDir: VIBE_UNITY },
-	{ file: "vrchat-unity-avatar.md", extensionDir: VIBE_UNITY },
-	{ file: "vrchat-unity-world.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-worker.md", extensionDir: PI_UNITY_EXT },
+	{ file: "unity-critic.md", extensionDir: PI_UNITY_EXT },
+	{ file: "unity-diagnostician.md", extensionDir: PI_UNITY_EXT },
+	{ file: "unity-finalizer.md", extensionDir: PI_UNITY_EXT },
+	{ file: "vrchat-unity-avatar.md", extensionDir: PI_UNITY_EXT },
+	{ file: "vrchat-unity-world.md", extensionDir: PI_UNITY_EXT },
 	// Reads reference images with `read` and needs no extension tool, so it
 	// declares no `extensions:` line. The stamp is a no-op on it, but the
 	// installer still has to own the copy: a template that is in
 	// the manager prompt's allowedAgents and in no repo is a spawn target that
 	// vanishes the next time this list is edited without it.
-	{ file: "unity-reference-describer.md", extensionDir: VIBE_UNITY },
+	{ file: "unity-reference-describer.md", extensionDir: PI_UNITY_EXT },
 ];
 
 const write = process.argv.includes("--write");
