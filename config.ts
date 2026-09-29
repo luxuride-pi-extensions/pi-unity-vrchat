@@ -15,7 +15,7 @@
 
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadManagerCore } from "./manager-core.js";
@@ -36,17 +36,17 @@ export const APP_NAME = "pi-unity";
 export const ENV_UNITY_BRIDGE_DIR = "PI_UNITY_BRIDGE_DIR";
 export const ENV_UNITY_TMP_DIR = "PI_UNITY_TMP_DIR";
 
-function xdgCacheHome(): string {
-	return process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
-}
-
-/** Expand a leading `~` and resolve relative paths against the cwd. */
-function expandUserPath(raw: string, cwd: string = process.cwd()): string {
-	const value = raw.trim();
-	if (value === "~") return homedir();
-	if (value.startsWith("~/")) return homedir() + value.slice(1);
-	return isAbsolute(value) ? value : resolve(cwd, value);
-}
+/**
+ * Path resolution comes from the shared core rather than a local copy.
+ *
+ * These two were defined here AND exported by the core this file already loads,
+ * so the question of which definition a caller used was decided by import order
+ * rather than by intent. The core's is the one pi-manager-core tests, and a
+ * fourth copy of a five-line function is exactly the kind of drift the core
+ * exists to stop.
+ */
+const xdgCacheHome = core.xdgCacheHome;
+const expandUserPath = (raw: string, cwd: string = process.cwd()): string => core.expandUserPath(raw, cwd);
 
 export function getUnityAssetsDir(): string {
 	return join(EXTENSION_DIR, "unity");
