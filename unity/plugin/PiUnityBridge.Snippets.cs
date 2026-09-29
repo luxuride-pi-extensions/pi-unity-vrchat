@@ -67,6 +67,24 @@ namespace PiUnity
 			catch (TargetInvocationException error)
 			{
 				Exception cause = error.InnerException ?? error;
+				// Append what the snippet printed BEFORE it threw.
+				//
+				// A snippet that builds a list of findings, logs them, and then
+				// hits a null reference has already done the work a caller wants,
+				// and the lines that explain WHY it failed are usually printed
+				// just above the throw. The capture was restored and read, but
+				// only on the success path -- the throw discarded the buffer, so
+				// the caller got the exception with no stdout at all, and re-ran
+				// the snippet to collect output it had already paid for.
+				Console.SetOut(previousOut);
+				Console.SetError(previousError);
+				string printed = captured.ToString().TrimEnd();
+				if (printed.Length > 0)
+				{
+					throw new Exception(
+						"C# snippet threw: " + cause + "\n\n--- output before the throw ---\n" + printed,
+						cause);
+				}
 				throw new Exception("C# snippet threw: " + cause, cause);
 			}
 			finally
