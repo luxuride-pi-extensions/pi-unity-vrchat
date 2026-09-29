@@ -48,7 +48,6 @@ import {
 	UNITY_SCENE_INFO_CATEGORIES,
 	UNITY_TOOLS,
 } from "./unity/runtime.js";
-import { ensureUnityLaunchedForce, resetUnityLaunch } from "./launch.js";
 import { getManagerPrompt } from "./config.js";
 import { loadManagerCore } from "./manager-core.js";
 
@@ -948,12 +947,14 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 		engagedMessage: "Unity engaged — this session is the manager.",
 		onEngage: () => {
 			managerMode.markEngaged();
-			// Force-launch so a project opened and closed moments ago is relaunched
-			// rather than treated as already-alive. No project is known here, so a
-			// workspace_init call still has to happen before the bridge can serve
-			// anything; the launch is best-effort by design.
-			resetUnityLaunch();
-			ensureUnityLaunchedForce();
+			// Deliberately NO launch here. Engaging a session says nothing about
+			// which project to open — there is no project, no manifest and no
+			// workspace yet — so the only thing a launch could do is open an
+			// Editor with nothing in it, which never heartbeats and only
+			// produces timeouts. unity_workspace_init launches the Editor with
+			// the project it just made; until then pi attaches to whatever Editor
+			// the user has open, and launches nothing. See
+			// noProjectKnownMessage in launch.ts.
 		},
 	});
 

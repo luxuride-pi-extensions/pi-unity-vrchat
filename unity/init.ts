@@ -54,6 +54,8 @@ export interface WorkspaceInitResult {
 	manifestPath: string;
 	projectReady: boolean;
 	message: string;
+	/** The project to launch the Editor with. Never blank: init just made it. */
+	projectPath: string;
 }
 
 function writeFreshManifest(
@@ -92,6 +94,7 @@ export function ensureWorkspaceInitialized(options: WorkspaceInitOptions): Works
 			scenePath: manifest.scenePath,
 			manifestPath,
 			projectReady: looksLikeUnityProject(workspacePath),
+			projectPath: workspacePath,
 			message: `Workspace already exists (adopted: ${manifest.adopted}). Reusing it.`,
 		};
 	}
@@ -164,6 +167,7 @@ export function ensureWorkspaceInitialized(options: WorkspaceInitOptions): Works
 		scenePath: manifest.scenePath,
 		manifestPath,
 		projectReady: looksLikeUnityProject(workspacePath),
+		projectPath: workspacePath,
 		message,
 	};
 }
@@ -179,7 +183,7 @@ export async function openWorkspaceInLiveUnity(
 	result: WorkspaceInitResult,
 ): Promise<{ openedInLiveUnity: boolean; liveUnityMessage: string }> {
 	try {
-		await requestLiveUnityOpenScene(result.scenePath);
+		await requestLiveUnityOpenScene(result.scenePath, result.projectPath);
 		return { openedInLiveUnity: true, liveUnityMessage: "" };
 	} catch (error) {
 		return {

@@ -157,6 +157,35 @@ export function resetUnityLaunch(): void {
 	unityLaunchStarted = false;
 }
 
+/**
+ * Why pi refuses to launch an Editor with no project.
+ *
+ * An Editor started without `-projectPath` comes up with no project, so the
+ * bridge plugin is not there, so it can never heartbeat, so the request that
+ * triggered the launch times out — and the watchdog then arms a 180s warning
+ * about licensing that is not the problem at all. Worse, this repeats: the
+ * per-turn context injection asks for a session context every turn, and each
+ * ask relaunches the Editor, so a manager session opened in a directory with
+ * no Unity project produces an endless stream of Editor windows and timeout
+ * errors.
+ *
+ * So the launch is gated on a project being KNOWN, not on the session being
+ * engaged. `launchProjectPath` comes from a workspace manifest, which means
+ * `unity_workspace_init` (or an adopted project) has run. A user who has the
+ * project open in their own Editor is unaffected: `isLiveBridgeAlive()` is
+ * checked first, and pi attaches to that Editor without launching anything.
+ */
+export function noProjectKnownMessage(requestLabel?: string): string {
+	const what = requestLabel ? ` (request: ${requestLabel})` : "";
+	return (
+		`The Unity Editor is not running and no project is known, so pi did not launch one${what}. ` +
+		"Unity needs a project path: without one the Editor opens with no project, the pi bridge plugin " +
+		"is never compiled, and the request could only ever time out. " +
+		"Call `unity_workspace_init` with a workspace to generate or adopt a project, or open your project " +
+		"in the Unity Editor yourself — the bridge attaches to an Editor you launched without spawning one."
+	);
+}
+
 function clearUnityWatchdog(): void {
 	if (unityWatchdog) {
 		clearTimeout(unityWatchdog);
@@ -183,6 +212,9 @@ function armUnityWatchdog(): void {
 export async function ensureUnityLaunchedForce(projectPath?: string): Promise<void> {
 	if (process.env.PI_UNITY_NO_UI?.trim() === "1") return;
 	if (isLiveBridgeAlive()) return;
+	// No project, no launch. See noProjectKnownMessage for what happens
+	// otherwise, and why it repeats on every turn.
+	if (!projectPath?.trim()) return;
 	if (unityLaunchStarted && !unitySpawnInFlight) return;
 
 	unityLaunchStarted = true;
@@ -227,6 +259,9 @@ export async function ensureUnityLaunchedForce(projectPath?: string): Promise<vo
 /** Lazy variant used inside tool paths; never throws on launch failure. */
 export async function ensureUnityLaunched(projectPath?: string): Promise<void> {
 	if (isLiveBridgeAlive()) return;
+	// Thrown rather than skipped, so the caller reports the real cause instead
+	// of waiting out a timeout against an Editor that was never going to answer.
+	if (!projectPath?.trim()) throw new Error(noProjectKnownMessage());
 	try {
 		await ensureUnityLaunchedForce(projectPath);
 	} catch (error) {

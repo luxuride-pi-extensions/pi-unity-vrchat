@@ -67,7 +67,7 @@ Two things the installer cannot do for you:
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root. |
 | `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Request/response queue shared with the C# plugin. |
 | `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/pi-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
-| `PI_UNITY_NO_UI` | unset | `1` opts out of auto-launching the Editor. |
+| `PI_UNITY_NO_UI` | unset | `1` opts out of auto-launching the Editor entirely. Distinct from the no-project gate, which is on by default and needs no env var. |
 | `XDG_CONFIG_HOME` | auto | **Read, not set** — see below. Only consulted when it is unset. |
 
 Editor resolution order: `$UNITY_PATH` → macOS `/Applications/Unity/Hub/Editor`
@@ -83,10 +83,20 @@ and the Editor starts with `License is not active (com.unity.editor.ui)`.
 the caller has not set it themselves — setting it yourself is respected, because
 you knowing better is the more likely case.
 
-**The Editor is never launched at session start.** Like the Blender extension,
-Unity launches lazily on first engagement: `/unity` forces a launch, any
-`unity_*` call does a lazy launch. If you never mention Unity, you never get a
-Unity window.
+**The Editor is never launched at session start, and never without a project.**
+`/unity` no longer forces a launch: engaging a session says nothing about which
+project to open, so a launch there could only ever open an empty Editor, whose
+bridge plugin is not compiled, which never heartbeats and only produces timeouts.
+Any `unity_*` call does a lazy launch, but only when a project is KNOWN — a
+workspace manifest, which means `unity_workspace_init` has run and pi has a
+project path to hand the Editor. With no project, the call reports that fact and
+launches nothing; it does not wait out a timeout against an Editor that was never
+going to answer. If you never mention Unity, you never get a Unity window, and if
+you never open a project, you never get an empty one either.
+
+An Editor **you** launched yourself is always attached to, and never replaced:
+the live-bridge check happens before the gate, so a hand-opened project works with
+no `unity_workspace_init` at all.
 
 ### Agent templates
 

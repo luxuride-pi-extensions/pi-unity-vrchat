@@ -257,8 +257,14 @@ export const requestLiveUnityWorld = (options: {
 		},
 	});
 
-export const requestLiveUnityOpenScene = (scenePath: string) =>
-	requestLiveUnityBridge<import("./types.js").UnityOpenSceneResult>({ payload: { type: "open-scene", scenePath } });
+export const requestLiveUnityOpenScene = (scenePath: string, projectPath?: string) =>
+	requestLiveUnityBridge<import("./types.js").UnityOpenSceneResult>({
+		// The one request that always has a project: workspace_init just
+		// generated or adopted it. This is what makes a cold start possible
+		// without opening the gate to every other call site.
+		launchProjectPath: projectPath,
+		payload: { type: "open-scene", scenePath },
+	});
 
 export const requestLiveUnityReloadScene = () =>
 	requestLiveUnityBridge<import("./types.js").UnityReloadSceneResult>({ payload: { type: "reload-scene" } });
