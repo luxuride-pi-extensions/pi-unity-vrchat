@@ -583,10 +583,41 @@ namespace PiUnity
 			// System.Collections.Generic is imported, so a bare IList resolves to
 			// IList<T> and demands a type argument.
 			System.Collections.IList typed = (System.Collections.IList)Activator.CreateInstance(listType);
-			foreach (object item in source)
+			for (int i = 0; i < source.Count; i++)
 			{
-				if (item == null) continue;
-				if (elementType.IsInstanceOfType(item)) typed.Add(item);
+				object item = source[i];
+				if (item == null)
+				{
+					// Null is a legal element for a reference-typed element type,
+					// so it is passed through rather than dropped. Dropping it
+					// would shorten the caller's list by one position and shift
+					// every later argument.
+					if (elementType.IsValueType)
+					{
+						throw new ArgumentException(
+							"Argument " + (i + 1) + " is null but " + target.Name + " holds " +
+							elementType.Name + ", which cannot be null. A non-null list keeps its length."
+						);
+					}
+					typed.Add(null);
+					continue;
+				}
+				if (!elementType.IsInstanceOfType(item))
+				{
+					// Throwing rather than skipping, which is what this did.
+					// Skipping produced a SHORTER list, FindMethod then bound the
+					// overload successfully because a List<T> is assignable
+					// whatever its length, and the snippet ran with the caller's
+					// data silently absent -- no diagnostic, and a wrong result
+					// in whatever the call did with the list. A compile error
+					// names the position and both types; a dropped element names
+					// nothing and costs a debugging session.
+					throw new ArgumentException(
+						"Argument " + (i + 1) + " is a " + item.GetType().FullName + ", but " +
+						target.Name + " holds " + elementType.FullName + "."
+					);
+				}
+				typed.Add(item);
 			}
 			return typed;
 		}
