@@ -60,6 +60,29 @@ const core = loadManagerCore();
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
 
 /**
+ * The agents this manager may spawn.
+ *
+ * These are the names in `allowedAgents:` in unity/agents/unity-manager.md
+ * (line 49) minus the manager itself, which is the one asking. That line is
+ * what pi offers the session; this set is what the gate enforces, so the two
+ * must be edited together — test/agent-rosters.mjs compares them.
+ *
+ * `vrchat-unity-avatar` and `vrchat-unity-world` are in the list because for a
+ * VRChat world this manager delegates to a world specialist rather than the
+ * generic worker, and a roster that omitted them would block the only correct
+ * delegation available.
+ */
+const UNITY_MANAGER_ROSTER = new Set([
+	"unity-worker",
+	"unity-critic",
+	"unity-diagnostician",
+	"unity-finalizer",
+	"unity-reference-describer",
+	"vrchat-unity-avatar",
+	"vrchat-unity-world",
+]);
+
+/**
  * Manager mode, entered ONLY by the /unity command.
  *
  * The mechanism — the engaged flag, the tool_call gate, and the exemption for a
@@ -95,6 +118,10 @@ const managerMode = core.createManagerMode({
 		"unity_module_revert",
 		"unity_log_critique",
 	],
+	// The roster's RULE is the core's; only the names are ours. This manager had
+	// no roster at all, so it could spawn any agent in the session — including a
+	// writer that walks straight past the write/edit refusal above.
+	agentRoster: [...UNITY_MANAGER_ROSTER],
 	onGateMessage: (event) => {
 		if (event.toolName === "write" || event.toolName === "edit") {
 			return {
