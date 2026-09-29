@@ -172,14 +172,21 @@ namespace PiUnity
 				{
 					Material material = renderer.sharedMaterial;
 					string assetPath = AssetDatabase.GetAssetPath(material);
-					materialName = string.IsNullOrEmpty(assetPath)
-						? material.name
-						: Path.GetFileNameWithoutExtension(assetPath);
-					if (!materials.Contains(material))
+					int index = materials.IndexOf(material);
+					if (index < 0)
 					{
+						index = materials.Count;
 						materials.Add(material);
-						exportedNames.Add(materialName);
+						exportedNames.Add(UniqueExportedName(
+							string.IsNullOrEmpty(assetPath) ? material.name : Path.GetFileNameWithoutExtension(assetPath),
+							exportedNames));
 					}
+					// The "usemtl" name must be the name the MTL declared for THIS
+					// instance, taken back out of exportedNames rather than
+					// recomputed. They are the same string only while the name is
+					// unique, and the whole point of the rename below is that it
+					// sometimes is not.
+					materialName = exportedNames[index];
 					if (!materialNames.Contains(materialName)) materialNames.Add(materialName);
 				}
 				if (materialName != null) output.AppendLine("usemtl " + materialName);
@@ -247,6 +254,32 @@ namespace PiUnity
 		/// here is what produced silently broken textures: the MTL lives in cache
 		/// staging while the texture lives in the Unity project, so the reference
 		/// resolved to nothing while the transfer reported success.
+		/// A name for "newmtl" that no earlier material already took.
+		///
+		/// The collision this closes is the same shape as the one the comment
+		/// above this method describes, one level up. That fix stopped
+		/// FindAssets matching the wrong material; it did not stop two DIFFERENT
+		/// assets whose files share a name -- Assets/A/Fabric.mat and
+		/// Assets/B/Fabric.mat -- from both exporting as "Fabric". The MTL then
+		/// held two "newmtl Fabric" blocks, every reader takes the first, and the
+		/// second material's colours and texture went nowhere with no diagnostic.
+		/// Disambiguating is the only fix: a suffix keeps the readable base name,
+		/// and the MTL records the rename in a comment so a caller reading the
+		/// file can see that "Fabric_2" is not a name the project ever had.
+		private static string UniqueExportedName(string wanted, List<string> taken)
+		{
+			if (!taken.Contains(wanted)) return wanted;
+			for (int suffix = 2; suffix < 1000; suffix++)
+			{
+				string candidate = wanted + "_" + suffix;
+				if (!taken.Contains(candidate)) return candidate;
+			}
+			// Unreachable in practice, and a name that cannot collide beats an
+			// exception: the export is still worth having, and the sidecar
+			// carries the real asset paths either way.
+			return wanted + "_" + taken.Count;
+		}
+
 		private static void WriteMtl(string mtlPath, List<Material> materials, List<string> exportedNames)
 		{
 			var mtl = new StringBuilder();
@@ -260,6 +293,13 @@ namespace PiUnity
 				// The name a "usemtl" line refers to, NOT material.name.
 				string name = index < exportedNames.Count ? exportedNames[index] : (material == null ? "material_" + index : material.name);
 				mtl.AppendLine("newmtl " + name);
+				if (index < exportedNames.Count && name != (material == null ? "" : material.name))
+				{
+					// The declared name is not the asset's own, so it was renamed
+					// to stay unique. Said out loud, because the receiving side
+					// sees only the new name.
+					mtl.AppendLine("# pi: exported as \"" + name + "\" to keep it distinct from another material of the same name");
+				}
 				if (material == null) continue;
 
 				string colorProperty = FirstExisting(material, ColorProperties);
