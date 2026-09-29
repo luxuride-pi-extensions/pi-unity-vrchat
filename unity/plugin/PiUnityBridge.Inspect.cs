@@ -886,34 +886,61 @@ namespace PiUnity
 			Transform transform = target.transform;
 			Vector3 before = spaceName == "local" ? transform.localPosition : transform.position;
 
+			// Record BEFORE the first mutation, and validate every argument
+			// before applying any of them.
+			//
+			// Both halves were wrong. Undo.RecordObject snapshots the object as
+			// it is at the moment of the call, so recording after the writes
+			// captured the already-changed state and Ctrl-Z restored nothing --
+			// this file's header promises every write is undoable, and for the
+			// transform tool it was not. And applying position before parsing
+			// rotation meant a malformed rotation left a moved object behind
+			// with no record of it, which is the one failure a tool making small
+			// edits exists to prevent.
+			Undo.RecordObject(transform, "pi set transform " + gameObjectName);
+
 			string position = request.GetString("position");
 			string rotation = request.GetString("rotationEuler");
 			string scale = request.GetString("scale");
 
+			// Parsed up front, so a bad number fails the whole call with nothing
+			// written, rather than partway through.
+			Vector3? parsedPosition = null;
+			Vector3? parsedRotation = null;
+			Vector3? parsedScale = null;
 			if (!string.IsNullOrEmpty(position))
 			{
 				string[] parts = SplitNumbers(position);
 				if (parts.Length < 3) throw new Exception("position needs three numbers, got \"" + position + "\".");
-				Vector3 value = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
-				if (spaceName == "local") transform.localPosition = value;
-				else transform.position = value;
+				parsedPosition = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
 			}
 			if (!string.IsNullOrEmpty(rotation))
 			{
 				string[] parts = SplitNumbers(rotation);
 				if (parts.Length < 3) throw new Exception("rotationEuler needs three numbers, got \"" + rotation + "\".");
-				Vector3 value = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
-				if (spaceName == "local") transform.localEulerAngles = value;
-				else transform.eulerAngles = value;
+				parsedRotation = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
 			}
 			if (!string.IsNullOrEmpty(scale))
 			{
 				string[] parts = SplitNumbers(scale);
 				if (parts.Length < 3) throw new Exception("scale needs three numbers, got \"" + scale + "\".");
-				transform.localScale = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
+				parsedScale = new Vector3(Pf(parts[0]), Pf(parts[1]), Pf(parts[2]));
 			}
 
-			Undo.RecordObject(transform, "pi set transform " + gameObjectName);
+			if (parsedPosition.HasValue)
+			{
+				if (spaceName == "local") transform.localPosition = parsedPosition.Value;
+				else transform.position = parsedPosition.Value;
+			}
+			if (parsedRotation.HasValue)
+			{
+				if (spaceName == "local") transform.localEulerAngles = parsedRotation.Value;
+				else transform.eulerAngles = parsedRotation.Value;
+			}
+			// Scale is always local: localScale is the only scale a Transform has,
+			// and world scale does not exist.
+			if (parsedScale.HasValue) transform.localScale = parsedScale.Value;
+
 			EditorUtility.SetDirty(target);
 			Scene scene = SceneManager.GetActiveScene();
 			if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);
