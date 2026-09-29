@@ -70,7 +70,7 @@ let unitySpawnInFlight = false;
 let unityWatchdog: NodeJS.Timeout | undefined;
 
 function warn(message: string): void {
-	console.error(`[pi-vibe-unity] warning: ${message}`);
+	console.error(`[pi-unity] warning: ${message}`);
 }
 
 function fromEnv(): UnityArgv | undefined {

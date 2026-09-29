@@ -26,9 +26,9 @@
  *    verifies what the installer is asked to produce, not the installed
  *    result; `test/install-agents.mjs` covers the substitution.
  *
- * It also loads vibe-blender as a TOOL PROVIDER even though it contributes no
+ * It also loads pi-blender as a TOOL PROVIDER even though it contributes no
  * templates to this check. `unity-blender-manager` lives in the binder repo and
- * names both sides' tools, so without vibe-blender in the provider set every
+ * names both sides' tools, so without pi-blender in the provider set every
  * `blender_*` tool it lists would read as unresolvable — a false failure that
  * trains you to ignore this suite. Its OWN templates are deliberately not
  * walked: they carry a documented `/path/to/...` placeholder form rather than
@@ -106,12 +106,12 @@ function frontmatter(source, key) {
 }
 
 const TEMPLATE_DIRS = {
-	"vibe-unity": "unity/agents",
+	"pi-unity": "unity/agents",
 	"unity-blender": "agents",
 };
 
 /** Every extension whose tools a template may name, including ones with no templates here. */
-const PROVIDER_DIRS = ["vibe-unity", "vibe-blender", "unity-blender"];
+const PROVIDER_DIRS = ["pi-unity", "pi-blender", "unity-blender"];
 
 /**
  * Which extension dir each placeholder the installers substitute resolves to.
@@ -125,8 +125,8 @@ const PROVIDER_DIRS = ["vibe-unity", "vibe-blender", "unity-blender"];
  * it resolves to nothing here and the todo checks below cover it instead.
  */
 const PLACEHOLDER_OWNERS = new Map([
-	["__PI_VIBE_UNITY_DIR__", "vibe-unity"],
-	["__PI_VIBE_BLENDER_DIR__", "vibe-blender"],
+	["__PI_VIBE_UNITY_DIR__", "pi-unity"],
+	["__PI_VIBE_BLENDER_DIR__", "pi-blender"],
 ]);
 
 /**
@@ -169,7 +169,7 @@ function collectTemplates() {
  * Tools each template's own extension registers, keyed by directory name.
  *
  * Loading all three matters: the binder's `unity-blender-manager` names tools
- * from BOTH sides, so without `vibe-blender` in here every `blender_*` tool it
+ * from BOTH sides, so without `pi-blender` in here every `blender_*` tool it
  * lists would read as unresolvable and the suite would cry wolf.
  */
 const providers = new Map();

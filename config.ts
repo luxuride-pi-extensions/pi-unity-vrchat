@@ -31,7 +31,7 @@ const core = loadManagerCore();
 
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
-export const APP_NAME = "vibe-unity";
+export const APP_NAME = "pi-unity";
 
 export const ENV_UNITY_BRIDGE_DIR = "PI_UNITY_BRIDGE_DIR";
 export const ENV_UNITY_TMP_DIR = "PI_UNITY_TMP_DIR";
@@ -111,7 +111,7 @@ export function getUnityBridgeDir(): string {
 	if (envDir) {
 		return expandUserPath(envDir);
 	}
-	return join(xdgCacheHome(), "vibe-unity", "bridge");
+	return join(xdgCacheHome(), "pi-unity", "bridge");
 }
 
 /**
@@ -119,7 +119,7 @@ export function getUnityBridgeDir(): string {
  * Kept out of the workspace so a failed import never leaves junk in Assets/.
  */
 export function getUnityTempDir(): string {
-	const dir = expandUserPath(process.env[ENV_UNITY_TMP_DIR]?.trim() || join(xdgCacheHome(), "vibe-unity", "tmp"));
+	const dir = expandUserPath(process.env[ENV_UNITY_TMP_DIR]?.trim() || join(xdgCacheHome(), "pi-unity", "tmp"));
 	mkdirSync(dir, { recursive: true });
 	return dir;
 }

@@ -1,4 +1,4 @@
-# pi-vibe-unity — a TypeScript pi extension that ships a Unity Editor plugin and a
+# pi-unity — a TypeScript pi extension that ships a Unity Editor plugin and a
 # Unity project template. It is NOT itself a Unity project, so this deliberately
 # does NOT use Unity's stock .gitignore. Two rules in that file would break this
 # repo if copied:

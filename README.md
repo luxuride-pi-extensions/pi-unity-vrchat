@@ -1,15 +1,15 @@
-# pi-vibe-unity
+# pi-unity
 
 Live Unity Editor integration for [pi](https://github.com/badlogic/pi). The agent
 gets `unity_*` tools and a `/unity` command that operate on a *real, running*
-Unity Editor — the same design as `pi-vibe-blender`, adapted to the fact that
+Unity Editor — the same design as `pi-blender`, adapted to the fact that
 Unity has no scripting console.
 
-MIT. Extracted from the `vibe-unity` 0.1.0 prototype.
+MIT. Extracted from the `pi-unity` 0.1.0 prototype.
 
 ---
 
-## How it differs from pi-vibe-blender (read this first)
+## How it differs from pi-blender (read this first)
 
 Blender's bridge is a Python file pi drops into Blender and `exec`s from
 `bpy.app.timers`. Unity has **no editor scripting console**, so the live side
@@ -36,7 +36,7 @@ Three consequences you will feel:
 ## Install
 
 ```bash
-ln -sfn "$PWD" ~/.pi/agent/extensions/vibe-unity
+ln -sfn "$PWD" ~/.pi/agent/extensions/pi-unity
 ```
 
 Two things the installer cannot do for you:
@@ -65,8 +65,8 @@ Two things the installer cannot do for you:
 | --- | --- | --- |
 | `UNITY_PATH` | auto | Editor binary. **Whitespace-split into argv**, so `UNITY_PATH="flatpak run org.unity.Unity"` works without a shell. |
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root. |
-| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/vibe-unity/bridge` | Request/response queue shared with the C# plugin. |
-| `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/vibe-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
+| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Request/response queue shared with the C# plugin. |
+| `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/pi-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
 | `VIBE_UNITY_NO_UNITY` | unset | `1` opts out of auto-launching the Editor. |
 | `XDG_CONFIG_HOME` | auto | **Read, not set** — see below. Only consulted when it is unset. |
 

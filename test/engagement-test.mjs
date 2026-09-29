@@ -22,10 +22,10 @@ const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: fa
 // the failure names the path it looked at, instead of a module-not-found.
 const EXTENSIONS = [
 	{
-		file: join(INSTALLED_EXTENSIONS, "vibe-unity", "index.ts"),
+		file: join(INSTALLED_EXTENSIONS, "pi-unity", "index.ts"),
 		command: "unity",
 		tool: "unity_bridge_status",
-		label: "pi-vibe-unity",
+		label: "pi-unity",
 		task: "add a cube to the scene",
 	},
 	{
@@ -100,7 +100,7 @@ async function loadExtension(spec) {
  *     manager prompt), so taking the first tested a handler that may not be the
  *     one under change and skipped the others entirely.
  *
- * pi-vibe-unity's handler returns a Promise (it awaits a live context fetch),
+ * pi-unity's handler returns a Promise (it awaits a live context fetch),
  * while the binder's returns a plain object, so the results are awaited
  * together. Later handlers must observe earlier mutations, so the event is
  * shared rather than rebuilt per handler.

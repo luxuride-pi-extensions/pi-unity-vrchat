@@ -73,7 +73,7 @@ function resolveTodoEntry() {
  * starts happening again.
  */
 
-const VIBE_UNITY = resolveInstalledExtensionDir("vibe-unity");
+const VIBE_UNITY = resolveInstalledExtensionDir("pi-unity");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
 // (pi-unity-blender/agents/) because it is a SIBLING top-level prompt rather

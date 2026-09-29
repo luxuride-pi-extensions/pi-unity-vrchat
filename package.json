@@ -1,5 +1,5 @@
 {
-	"name": "pi-vibe-unity",
+	"name": "pi-unity",
 	"version": "0.1.0",
 	"description": "pi extension: live Unity Editor integration (C# editor bridge, project workspaces, render, scene inspection) for stock pi",
 	"private": true,

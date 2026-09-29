@@ -17,7 +17,7 @@
 # the record stays true.
 #
 # `tools:` records the toolset this role assumes. `extensions:` records the two
-# extensions that must be installed for that toolset to exist (the vibe-unity
+# extensions that must be installed for that toolset to exist (the pi-unity
 # extension, and the todo package this role depends on).
 #
 # `ask_user_question` is the one tool in that line with no entry below in
@@ -36,14 +36,14 @@ tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls
 # does not load ambient parent extensions, so a tool named here that no listed
 # extension registers is requested and NEVER PROVIDED. `todo` is what keeps a
 # long build's plan from drifting, and it is the reason this arrangement exists
-# at all -- see `## Track the plan in todo` below. pi-vibe-blender's manager
+# at all -- see `## Track the plan in todo` below. pi-blender's manager
 # prompt records the same pair.
 #
 # The placeholders are STALE BY DESIGN: nothing rewrites this line, because the
 # file is not installed. They are kept rather than replaced with a host path
 # because a committed literal path is indistinguishable from a machine-specific
 # mistake to the next reader, and because the pair records which extensions
-# this role depends on. pi-vibe-blender's manager prompt keeps them too.
+# this role depends on. pi-blender's manager prompt keeps them too.
 extensions: __PI_AGENT_EXTENSION_DIR__, __PI_TODO_ENTRY__
 allowNestedSubagents: true
 allowedAgents: unity-worker, unity-critic, unity-diagnostician, unity-finalizer, unity-reference-describer, vrchat-unity-avatar, vrchat-unity-world
