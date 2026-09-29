@@ -50,14 +50,13 @@ import {
 } from "./unity/runtime.js";
 import { ensureUnityLaunchedForce, resetUnityLaunch } from "./launch.js";
 import { getManagerPrompt } from "./config.js";
-import * as localCore from "./manager-core.local.js";
-import { loadManagerCoreOrLocal } from "./manager-core.js";
+import { loadManagerCore } from "./manager-core.js";
 
 /**
  * The shared manager core, or this extension's own copy of it. See
  * manager-core.ts for the resolution order and why it is a runtime lookup.
  */
-const core = loadManagerCoreOrLocal(localCore);
+const core = loadManagerCore();
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
 

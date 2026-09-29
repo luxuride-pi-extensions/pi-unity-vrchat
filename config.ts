@@ -18,8 +18,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as localCore from "./manager-core.local.js";
-import { loadManagerCoreOrLocal } from "./manager-core.js";
+import { loadManagerCore } from "./manager-core.js";
 
 /**
  * The shared manager core, or this extension's own copy of it.
@@ -28,7 +27,7 @@ import { loadManagerCoreOrLocal } from "./manager-core.js";
  * evaluation: a lazy resolve would return a different core depending on when
  * the first prompt was read. See manager-core.ts for the resolution order.
  */
-const core = loadManagerCoreOrLocal(localCore);
+const core = loadManagerCore();
 
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
