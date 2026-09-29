@@ -68,6 +68,7 @@ Two things the installer cannot do for you:
 | `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Request/response queue shared with the C# plugin. |
 | `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/pi-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
 | `PI_UNITY_NO_UI` | unset | `1` opts out of auto-launching the Editor entirely. Distinct from the no-project gate, which is on by default and needs no env var. |
+| `PI_TODO_ENTRY` | `$PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts` | Install-time only. Pin the todo package when the agent templates name `todo` in `tools:` and the package is not in that npm tree; without it a worker is handed a `todo` it can never call. |
 | `XDG_CONFIG_HOME` | auto | **Read, not set** — see below. Only consulted when it is unset. |
 
 Editor resolution order: `$UNITY_PATH` → macOS `/Applications/Unity/Hub/Editor`
