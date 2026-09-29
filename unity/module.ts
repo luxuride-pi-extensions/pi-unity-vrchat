@@ -56,6 +56,24 @@ function padRun(sequence: number): string {
 }
 
 /**
+ * Claim the next iteration number, and hand back the same number as the run's
+ * sequence. The assignment onto `state` is the point: updateManifest persists
+ * the mutated state, not the callback's return value, so a callback that only
+ * returned the number published nothing and every run re-derived 1.
+ *
+ * Extracted so the one rule that matters — sequence IS the claimed iteration,
+ * never the length of the history — can be asserted without a live Unity Editor
+ * to hold a run open for. The history only records SUCCESSFUL runs, so any
+ * length-derived number is derived from a base that changes under concurrent
+ * runs, and two runs inside Unity at once get the same value.
+ */
+export function claimModuleRun(state: { latestIteration: number }): { iteration: number; sequence: number } {
+	const iteration = state.latestIteration + 1;
+	state.latestIteration = iteration;
+	return { iteration, sequence: iteration };
+}
+
+/**
  * Prepends a contract header naming the workspace, scene, and module the script
  * belongs to. A worker's own traceback then names the contract it broke,
  * instead of pointing at a bare snippet.
@@ -97,12 +115,22 @@ export async function unityModuleRun(options: ModuleRunOptions): Promise<ModuleR
 	// Claim the iteration *and* the run sequence under one manifest write, and
 	// publish it before the slow run starts: two concurrent runs must not be
 	// handed the same iteration number.
-	const claimed = await updateManifest<{ iteration: number; sequence: number }>(manifestPath, (state) => {
-		const iteration = state.latestIteration + 1;
-		state.latestIteration = iteration;
-		const sequence = state.moduleRuns.length + 1;
-		return { iteration, sequence };
-	});
+	//
+	// `sequence` is the CLAIMED ITERATION, not `moduleRuns.length + 1`. The
+	// history only ever records SUCCESSFUL runs, so two runs overlapping inside
+	// Unity both read the same length and were handed the same sequence — the
+	// same collision pi-blender fixed, and it lands harder here because the
+	// sequence is also the run DIRECTORY name (runs/NN), so the two runs
+	// overwrite each other's script, log and checkpoint. Then
+	// unityModuleRevert, which decides what "later" means by comparing sequences,
+	// can no longer tell them apart and its guard against discarding another
+	// module's work stops working. The claimed iteration is unique by
+	// construction, because it is claimed under this lock, and orders runs
+	// exactly as the history did; a legacy sequence is always <= its iteration,
+	// so the comparison stays monotonic across the upgrade.
+	const claimed = await updateManifest<{ iteration: number; sequence: number }>(manifestPath, (state) =>
+		claimModuleRun(state),
+	);
 
 	const runDir = join(moduleDir, "runs", padRun(claimed.sequence));
 	const rendersDir = join(runDir, "renders");
