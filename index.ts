@@ -951,9 +951,10 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	}));
 
 	// Engagement is per-session: a fresh session must not inherit the
-	// guidance-injection flag from a previous one.
-	pi.on("session_start", () => {
-		managerMode.reset();
+	// guidance-injection flag from a previous one. A /reload is not a fresh
+	// session and keeps it — see createManagerMode's reset().
+	pi.on("session_start", (event) => {
+		managerMode.reset(event?.reason);
 	});
 
 	// The gate itself. This line was MISSING while the extension already
