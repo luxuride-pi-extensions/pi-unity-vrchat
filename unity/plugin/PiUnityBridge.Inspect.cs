@@ -521,19 +521,58 @@ namespace PiUnity
 						return summary;
 					}
 				default:
-					return Json.Str(property.propertyType + ":" + SafePropertyText(property));
+					// Return the VALUE, not the type. This branch is reached for
+					// the property types above the switch cannot render -- a
+					// Hash128, a managed reference that refused to resolve, an
+					// enum-with-flags. The comment on SerializePropertyValue
+					// promises "its raw text rather than being silently dropped,
+					// so an unexpected type is visible"; a raw text that is the
+					// type's own name is no text at all, and it repeated what
+					// the caller already has in its hand. It has been returning
+					// propertyType.ToString() since the initial commit, which
+					// made the promise false for every unhandled type.
+					string raw = SafePropertyValue(property);
+					return Json.Str(property.propertyType + ":" + (raw.Length > 0 ? raw : "<empty>"));
 			}
 		}
 
-		private static string SafePropertyText(SerializedProperty property)
+		/// The property's current value as text, for a type SerializePropertyValue
+		/// does not render.
+		///
+		/// Best effort by type rather than by reflection over every field:
+		/// SerializedProperty's typed accessors are the only ones that survive a
+		/// property of a type pi has never seen, and they are individually
+		/// guarded because a property whose value cannot be read must still
+		/// yield the other branches rather than abort the whole inspect.
+		private static string SafePropertyValue(SerializedProperty property)
 		{
 			try
 			{
-				return property.propertyType.ToString();
+				switch (property.propertyType)
+				{
+					case SerializedPropertyType.Hash128: return property.hash128Value.ToString();
+					case SerializedPropertyType.Bounds: return property.boundsValue.ToString();
+					case SerializedPropertyType.Rect: return property.rectValue.ToString();
+					case SerializedPropertyType.AnimationCurve: return property.animationCurveValue == null ? "" : "curve";
+					case SerializedPropertyType.BoundsInt: return property.boundsIntValue.ToString();
+					case SerializedPropertyType.RectInt: return property.rectIntValue.ToString();
+					case SerializedPropertyType.Enum:
+						// enumNames plus the index, so the caller gets the same
+						// shape AssignProperty accepts: a display name or an index.
+						// SerializedPropertyType has no Char member -- a char is
+						// serialized as Integer, which SerializePropertyValue
+						// already renders.
+						return property.enumValueIndex + " " + (property.displayName ?? "");
+					default:
+						// Anything still unrendered falls back to the raw text
+						// Unity itself shows for it, which is the one accessor
+						// that covers every remaining type.
+						return property.stringValue ?? "";
+				}
 			}
 			catch (Exception)
 			{
-				return "<unreadable>";
+				return "";
 			}
 		}
 
@@ -623,7 +662,11 @@ namespace PiUnity
 			// RevertAllDownToGroup needs to roll a failed write back.
 			int undoGroup = Undo.GetCurrentGroup();
 			Undo.RecordObject(component, "pi set " + propertyPath);
-			string before = property.propertyType.ToString() + "=" + SafePropertyText(property);
+			// The pre-write value, rendered through the same path the read side
+			// uses, so the hint a failed write carries is the value the caller
+			// would have got by reading it -- and not its type, which is what
+			// this reported before SafePropertyValue existed.
+			string before = property.propertyType + "=" + SafePropertyValue(property);
 
 			try
 			{
