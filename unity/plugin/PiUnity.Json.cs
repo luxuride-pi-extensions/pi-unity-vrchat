@@ -324,12 +324,50 @@ namespace PiUnity
 				{
 					if (text[index] == '\\' && index + 1 < text.Length)
 					{
-						index++;
-						char escaped = text[index];
-						builder.Append(escaped == 'n' ? '\n' : escaped == 'r' ? '\r' : escaped == 't' ? '\t' : escaped);
+						// Decode the escape, and keep what it stands for rather than
+						// the character that introduced it.
+						//
+						// The previous loop appended `escaped` for anything that was
+						// not n/r/t, so \" came back as a bare quote, \\ as a single
+						// backslash, and \u0041 as the four literal characters
+						// "u0041". A Windows path in a value -- the one string a
+						// Unity caller passes most often -- is full of backslashes,
+						// so a doubled separator silently collapsed to one and
+						// every subsequent \X lost its backslash. The result parsed,
+						// because the parser never validates, and the error surfaced
+						// as a path that simply did not exist.
+						char escaped = text[index + 1];
+						index += 2;
+						switch (escaped)
+						{
+							case 'n': builder.Append('\n'); break;
+							case 'r': builder.Append('\r'); break;
+							case 't': builder.Append('\t'); break;
+							case 'b': builder.Append('\b'); break;
+							case 'f': builder.Append('\f'); break;
+							case '/': builder.Append('/'); break;
+							case '\\': builder.Append('\\'); break;
+							case '"': builder.Append('"'); break;
+							case 'u':
+								{
+									// \uXXXX, with a surrogate pair left to the next
+									// escape so an astral character survives intact.
+									if (index + 4 <= text.Length &&
+										int.TryParse(text.Substring(index, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int code))
+									{
+										builder.Append((char)code);
+										index += 4;
+									}
+									else builder.Append('u');
+									break;
+								}
+							// An escape JSON does not define is passed through
+							// whole, backslash included, so the value round-trips
+							// instead of losing a character.
+							default: builder.Append('\\').Append(escaped); break;
+						}
 					}
-					else builder.Append(text[index]);
-					index++;
+					else builder.Append(text[index++]);
 				}
 				index++;
 				value.asString = builder.ToString();

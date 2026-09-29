@@ -23,6 +23,17 @@ internal static class Program
 {
 	private static int failures;
 
+	/// A string through a JSON object and back, which is the only route a
+	/// value takes between the caller and the C# side.
+	private static string RoundTrip(string value)
+	{
+Json wrapper = new Json();
+wrapper.OpenObject();
+wrapper.AddString("v", value);
+wrapper.CloseObject();
+return Json.Parse(wrapper.ToString()).GetString("v");
+	}
+
 	private static void Check(string name, bool ok, string detail = "")
 	{
 		if (ok)
@@ -191,6 +202,39 @@ internal static class Program
 		bools.CloseObject();
 		Check("Add(key, bool) emits true/false, not 1/0",
 			bools.ToString().Contains(":true"), bools.ToString());
+
+		// 11. Escape decoding on the way IN. The writer always escapes, so this
+		//     is the path every value with a backslash, quote or control
+		//     character takes. It decoded only n/r/t and appended the character
+		//     that followed the backslash for anything else, so a Windows path
+		//     -- the string a Unity caller passes most -- lost a backslash per
+		//     separator and came back wrong, with no error anywhere.
+		Check("a Windows path survives the round trip",
+			RoundTrip("C:\\Users\\lux\\Project\\Assets\\Scene.unity")
+				== "C:\\Users\\lux\\Project\\Assets\\Scene.unity",
+			RoundTrip("C:\\Users\\lux\\Project\\Assets\\Scene.unity"));
+		Check("a quote inside a value survives",
+			RoundTrip("say \"hi\"") == "say \"hi\"", RoundTrip("say \"hi\""));
+		Check("a backslash-quote pair stays two characters",
+			RoundTrip("a\\\"b") == "a\\\"b", RoundTrip("a\\\"b"));
+		Check("\\uXXXX decodes to its character",
+			Json.Parse("{\"v\":\"\\u0041\\u00e9\"}").GetString("v") == "A\u00e9",
+			Json.Parse("{\"v\":\"\\u0041\\u00e9\"}").GetString("v"));
+		// And the inverse: a LITERAL backslash-u, which is what a value carrying
+		// the text "\u0041" actually contains, must come back as itself. Written
+		// as raw JSON so the two cases cannot be confused -- a round trip
+		// through the writer escapes the backslash, and asserting the decoded
+		// character there would demand that a literal string change meaning.
+		Check("a literal backslash-u stays literal",
+			RoundTrip("\\u0041") == "\\u0041", RoundTrip("\\u0041"));
+		Check("a lone backslash before a quote does not run off the string",
+			RoundTrip("trailing\\") == "trailing\\", RoundTrip("trailing\\"));
+		Check("tab and newline survive the round trip",
+			RoundTrip("a\tb\nc") == "a\tb\nc",
+			RoundTrip("a\tb\nc").Replace("\t", "\\t").Replace("\n", "\\n"));
+		Check("an undefined escape is passed through whole",
+			Json.Parse("{\"v\":\"a\\qb\"}").GetString("v") == "a\\qb",
+			Json.Parse("{\"v\":\"a\\qb\"}").GetString("v"));
 
 		Console.WriteLine();
 		Console.WriteLine(failures == 0
