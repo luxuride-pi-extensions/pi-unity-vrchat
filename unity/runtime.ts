@@ -47,6 +47,9 @@ export {
 	requestLiveUnityExportObj,
 	requestLiveUnityFindSourceModels,
 	requestLiveUnityExportSourceModels,
+	requestLiveUnityGeometryProbe,
+	requestLiveUnityInstantiatePrefab,
+	requestLiveUnityPrefabInfo,
 	requestLiveUnityInspect,
 	requestLiveUnitySceneInfo,
 	requestLiveUnitySessionContext,
@@ -76,6 +79,16 @@ export {
 	type UnityExportObjResult,
 	type UnitySourceModel,
 	type UnitySourceModelsResult,
+	type UnityGeometryProbeCheck,
+	type UnityGeometryProbeResult,
+	type UnityProbeAxis,
+	type UnityProbeBounds,
+	type UnityProbeObject,
+	type UnityProbePair,
+	type UnityProbeSelfSymmetry,
+	type UnityProbeShape,
+	type UnityProbeTopology,
+	type UnityProbeTransform,
 } from "./types.js";
 
 export {

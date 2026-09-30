@@ -697,8 +697,28 @@ namespace PiUnity
 			return result.ToString();
 		}
 
+		/// Directs a write to the right place, and says so when it cannot.
+		///
+		/// `AssetDatabase.GetAssetPath(component)` is empty for every component in
+		/// a scene, INCLUDING one inside a prefab instance. Testing only that made
+		/// `space: "asset"` a no-op for exactly the objects a caller writing to a
+		/// prefab asset is holding -- it fell through to the scene branch, marked
+		/// the scene dirty, and reported "asset" back as if it had written one.
 		private static void MarkDirtyForSpace(Component component, string spaceName)
 		{
+			if (spaceName == "asset")
+			{
+				// A scene object inside a prefab instance: write through to the
+				// asset the instance came from, so the change belongs to the asset
+				// and not to one arbitrary instance of it.
+				Component source = PrefabUtility.GetCorrespondingObjectFromSource(component);
+				if (source != null)
+				{
+					AssetDatabase.SaveAssetIfDirty(source);
+					return;
+				}
+			}
+
 			string assetPath = AssetDatabase.GetAssetPath(component);
 			if (spaceName == "global" || (!string.IsNullOrEmpty(assetPath) && spaceName == "asset"))
 			{

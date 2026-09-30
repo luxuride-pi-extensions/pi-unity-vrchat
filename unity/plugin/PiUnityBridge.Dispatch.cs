@@ -60,6 +60,15 @@ namespace PiUnity
 					return HandleExecuteCSharp(request);
 				case "import-fbx":
 					return ImportFbx(request);
+				case "instantiate-prefab":
+					return InstantiatePrefabAsset(request);
+				case "prefab-info":
+					return GetPrefabInfo(request);
+				case "geometry-probe":
+					// Read-only, so it is safe while another request holds the
+					// Editor: it never writes, dirties, saves or claims an
+					// iteration.
+					return GeometryProbe(request);
 				case "export-obj":
 					return ExportObj(request);
 				case "find-source-models":

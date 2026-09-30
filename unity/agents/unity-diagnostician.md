@@ -1,7 +1,7 @@
 ---
 name: unity-diagnostician
 description: Unity state diagnostician — measures live scene state and returns ranked, evidence-backed fixes for placement, transform, and configuration errors (a part in the wrong place, a mirrored avatar, an upload over budget). Read-only. Use one when something is wrong and the fix must be argued from numbers rather than a render.
-tools: read, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_vrc, unity_world, unity_source_models, contact_supervisor
+tools: read, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_vrc, unity_world, unity_source_models, unity_prefab_info, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at

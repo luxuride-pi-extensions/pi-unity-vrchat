@@ -38,7 +38,29 @@ VRCFury) whose shape you do not know. Both writes are undoable; a scene write
 marks the scene dirty without saving to disk.
 
 Pass `space: "asset"` when the target is a prefab **asset** rather than a scene
-instance — otherwise the edit lands on the instance and is lost on reload.
+instance — otherwise the edit lands on the instance and is lost on reload. For
+an object inside a prefab instance, `space: "asset"` writes through to the source
+asset, so every instance of that prefab sees the change; use the default `scene`
+space when you mean only this one.
+
+### Prefabs
+
+`unity_set_property` and `unity_set_transform` work on an instantiated prefab,
+and writing to one is a prefab **override** — recorded, so it survives, but
+revertible only by reloading the prefab. Use these two tools rather than a
+snippet:
+
+```
+unity_prefab_info      { workspace, prefabPath: "Assets/PiImported/Chair.prefab" }
+unity_instantiate_prefab { workspace, prefabPath: "Assets/PiImported/Chair.prefab",
+                           position: "2,0,0", rotation: "0,90,0" }
+```
+
+`unity_instantiate_prefab` returns the instance's scene `path` and its child
+inventory. **Use that `path`** for any follow-up call: a prefab's children repeat
+their names in every instance, so `gameObject: "Leg"` is refused as ambiguous the
+moment the asset is placed twice, while `gameObject: "Chair (2)/Leg"` resolves
+exactly.
 
 ### Rigs and bones
 

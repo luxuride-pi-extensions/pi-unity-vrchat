@@ -44,8 +44,14 @@ namespace PiUnity
 		/// walked the scene roots in order and returned the first hit. Silently
 		/// resolving to the wrong avatar is worse than refusing, because the
 		/// answer looks authoritative.
+		///
+		/// A name containing "/" is read as a SCENE PATH and resolved exactly:
+		/// the only cost of that is that no GameObject may be named "A/B", which
+		/// Unity's own hierarchy cannot produce either since a name cannot contain
+		/// a slash.
 		private static GameObject FindGameObjectByName(string name)
 		{
+			if (name != null && name.IndexOf('/') >= 0) return FindGameObjectByPath(name);
 			GameObject found = null;
 			List<string> owners = new List<string>();
 			Scene scene = SceneManager.GetActiveScene();
@@ -73,10 +79,49 @@ namespace PiUnity
 			{
 				throw new Exception(
 					"\"" + name + "\" is ambiguous: it exists under " + string.Join(" and ", owners.ToArray())
-					+ ". Name the object unambiguously, or scope the call with a path instead of a bare name."
+					+ ". Name the object unambiguously, or scope the call with its scene path (\""
+					+ string.Join("/", owners[0].Split('/')) + "/...\") instead of a bare name."
 				);
 			}
 			return found;
+		}
+
+		/// Resolves an EXACT scene path, "Root/Child/Grandchild", which is the
+		/// only unambiguous way to name an object whose parent already holds a
+		/// same-named child.
+		///
+		/// Every segment must match a real transform, and the whole chain must
+		/// end inside the active scene. A prefix that matches nothing is a miss,
+		/// not a shortcut to a partial match -- otherwise "Head" would resolve
+		/// inside an unrelated rig.
+		private static GameObject FindGameObjectByPath(string path)
+		{
+			string[] segments = path.Split('/');
+			if (segments.Length == 0 || segments[0].Length == 0) return null;
+
+			Scene scene = SceneManager.GetActiveScene();
+			Transform current = null;
+			foreach (GameObject root in scene.GetRootGameObjects())
+			{
+				if (root.name != segments[0]) continue;
+				current = root.transform;
+				break;
+			}
+			if (current == null) return null;
+
+			for (int index = 1; index < segments.Length; index++)
+			{
+				Transform next = null;
+				foreach (Transform child in current)
+				{
+					if (child.name != segments[index]) continue;
+					next = child;
+					break;
+				}
+				if (next == null) return null;
+				current = next;
+			}
+			return current.gameObject;
 		}
 
 		/// The transform tool lives on `UnityEditor.EditorTools.EditorTools`, a

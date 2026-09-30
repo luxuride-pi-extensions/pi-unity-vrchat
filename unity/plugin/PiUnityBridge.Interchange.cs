@@ -36,7 +36,26 @@ namespace PiUnity
 				throw new Exception("import-fbx requires a destination folder inside Assets/.");
 
 			string modelName = string.IsNullOrEmpty(name) ? Path.GetFileNameWithoutExtension(fbxPath) : name;
+			modelName = SanitizeAssetName(modelName);
+
+			// The FBX and the prefab must both be free before anything is written.
+			// MoveIntoAssets copies with overwrite, and SaveAsPrefabAsset replaces
+			// silently, so importing a second model under a name already in use
+			// destroyed the first one with no diagnostic -- the transfer then
+			// reported success on top of the wreckage.
+			string fbxTarget = destination.TrimEnd('/') + "/" + modelName + ".fbx";
 			string prefabPath = destination.TrimEnd('/') + "/" + modelName + ".prefab";
+			string fbxAbsolute = Path.Combine(ProjectRoot(), fbxTarget);
+			string prefabAbsolute = Path.Combine(ProjectRoot(), prefabPath);
+			if (File.Exists(fbxAbsolute) || File.Exists(prefabAbsolute))
+			{
+				throw new Exception(
+					"Importing \"" + modelName + "\" would overwrite an existing asset in " + destination +
+					": " + (File.Exists(fbxAbsolute) ? fbxTarget : prefabPath) +
+					". Pass a different name, or delete the old asset first -- an import never replaces a model " +
+					"that is already in the project."
+				);
+			}
 
 			// Move the FBX into Assets/ so the import produces a sub-asset we can
 			// instantiate, then pull a prefab out of it for a stable handle.
@@ -46,15 +65,19 @@ namespace PiUnity
 				throw new Exception("Unity did not produce a model for " + assetFbxPath + ". Check the Editor log for importer errors.");
 
 			var prefab = PrefabUtility.InstantiatePrefab(assetRoot) as GameObject;
-			if (prefab != null)
+			if (prefab == null)
 			{
-				prefab.name = modelName;
-				string scenePath = SceneManager.GetActiveScene().path;
-				prefab.transform.position = Vector3.zero;
-				PrefabUtility.SaveAsPrefabAsset(prefab, prefabPath);
-				UnityEngine.Object.DestroyImmediate(prefab);
-				if (!string.IsNullOrEmpty(scenePath)) EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+				throw new Exception(
+					"Imported " + assetFbxPath + " but Unity produced no prefab instance from it. Check the " +
+					"Editor log for importer errors -- the FBX is in the project, but nothing was created from it."
+				);
 			}
+			prefab.name = modelName;
+			string scenePath = SceneManager.GetActiveScene().path;
+			prefab.transform.position = Vector3.zero;
+			PrefabUtility.SaveAsPrefabAsset(prefab, prefabPath);
+			UnityEngine.Object.DestroyImmediate(prefab);
+			if (!string.IsNullOrEmpty(scenePath)) EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
 
 			Json result = new Json();
 			result.OpenObject();
@@ -63,6 +86,23 @@ namespace PiUnity
 			result.AddString("rootName", modelName);
 			result.CloseObject();
 			return result.ToString();
+		}
+
+		/// A name used as both a file name and a prefab name must be safe in both,
+		/// and must not silently change what the caller asked for -- so an illegal
+		/// character is refused rather than rewritten behind their back.
+		private static string SanitizeAssetName(string name)
+		{
+			string trimmed = (name ?? "").Trim();
+			if (trimmed.Length == 0) throw new Exception("Cannot derive a prefab name from an empty string.");
+			foreach (char bad in Path.GetInvalidFileNameChars())
+			{
+				if (trimmed.IndexOf(bad) >= 0)
+					throw new Exception(
+						"Model name \"" + trimmed + "\" contains \"" + bad + "\", which cannot appear in an asset name."
+					);
+			}
+			return trimmed;
 		}
 
 		private static string MoveIntoAssets(string sourcePath, string destinationFolder, string extension)
@@ -94,8 +134,11 @@ namespace PiUnity
 			{
 				foreach (string name in names)
 				{
-					GameObject found = GameObject.Find(name);
-					if (found == null) found = FindGameObjectByName(name);
+					// FindGameObjectByName first: GameObject.Find takes the first hit
+					// under an ambiguous name, so leading with it defeated the
+					// refusal that FindGameObjectByName exists to issue.
+					GameObject found = FindGameObjectByName(name);
+					if (found == null) found = GameObject.Find(name);
 					if (found == null) throw new Exception("No GameObject named \"" + name + "\" in the active scene.");
 					roots.Add(found);
 				}

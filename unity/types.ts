@@ -84,6 +84,19 @@ export interface UnitySceneObject {
 	prefabAssetPath?: string;
 }
 
+/** One row of `unity_scene_info { categories: ["assets"] }`. */
+export interface UnityAssetEntry {
+	path: string;
+	type: string;
+	/**
+	 * Disambiguates a prefab from a model, because both have main-asset type
+	 * GameObject -- so `type` alone cannot tell a prefab worth placing from the
+	 * FBX a prefab was already made from.
+	 */
+	isPrefab?: boolean;
+	isModel?: boolean;
+}
+
 /** One bone's placement, from unity_bones. */
 export interface UnityBone {
 	name: string;
@@ -230,6 +243,23 @@ export interface UnityMaterialInfo {
 	renderQueue: string;
 }
 
+/**
+ * A material in use that has no .mat file of its own.
+ *
+ * `assetPath` empty means it is a built-in shader material; otherwise it is the
+ * asset the material is embedded in, which for a model from Blender is the FBX.
+ */
+export interface UnityEmbeddedMaterialInfo {
+	name: string;
+	assetPath: string;
+	kind: "embeddedInModel" | "builtin";
+	parentAsset: string;
+	shader: string;
+	/** Scene object name holding a renderer that uses it. */
+	usedBy: string;
+	color?: number[];
+}
+
 export interface UnityCameraInfo {
 	name: string;
 	gameObject: string;
@@ -262,10 +292,7 @@ export interface UnityPackageInfo {
 	version: string;
 }
 
-export interface UnityAssetInfo {
-	path: string;
-	type: string;
-}
+export interface UnityAssetInfo extends UnityAssetEntry {}
 
 export interface UnityCompileStatus {
 	isCompiling: boolean;
@@ -279,6 +306,16 @@ export interface UnitySceneInfo {
 	unityVersion: string;
 	objects?: UnitySceneObject[];
 	materials?: UnityMaterialInfo[];
+	/**
+	 * Materials a scene object actually uses that `materials` cannot contain:
+	 * one embedded in a model file, or a built-in.
+	 *
+	 * `materials` is FindAssets("t:Material"), which only sees standalone .mat
+	 * files. A model transferred from Blender carries its materials inside the
+	 * FBX, so an empty `materials` list is not evidence they were lost --
+	 * `embeddedMaterials` is where they are.
+	 */
+	embeddedMaterials?: UnityEmbeddedMaterialInfo[];
 	cameras?: UnityCameraInfo[];
 	lights?: UnityLightInfo[];
 	renderSettings?: UnityRenderSettings;
@@ -377,6 +414,69 @@ export interface UnityOpenSceneResult {
 	scenePath: string;
 }
 
+/** One node of a prefab hierarchy, as the bridge reports it. */
+export interface UnityPrefabChild {
+	name: string;
+	path: string;
+	localPosition: number[];
+	localScale: number[];
+	childCount: number;
+	components: string[];
+	/** Present only when the node carries a MeshFilter with a mesh. */
+	vertexCount?: number;
+	children?: UnityPrefabChild[];
+	/** Set when the listing stopped at the depth limit instead of at a leaf. */
+	childrenTruncatedAt?: string;
+}
+
+/**
+ * Bounds, with the caveat that produced them attached.
+ *
+ * `state` is load-bearing: a skinned renderer's bounds volume can read much
+ * larger than the mesh at rest, so a size reported without this reads as a
+ * measurement when it is really an upper bound.
+ */
+export interface UnityPrefabBounds {
+	state: string;
+	size?: number[];
+	center?: number[];
+}
+
+export interface UnityPrefabMaterial {
+	name: string;
+	/** Empty when the material is embedded in the model asset. */
+	assetPath: string;
+	parentAsset: string;
+	shader: string;
+	color?: number[];
+}
+
+/** What a prefab ASSET contains, read without instantiating it. */
+export interface UnityPrefabInfo {
+	prefabPath: string;
+	rootName: string;
+	meshCount: number;
+	childCount: number;
+	localScale: number[];
+	hasAnimator: boolean;
+	bounds: UnityPrefabBounds;
+	materials: UnityPrefabMaterial[];
+	children: UnityPrefabChild[];
+}
+
+/** A prefab placed into the active scene. */
+export interface UnityPrefabInstanceResult {
+	gameObject: string;
+	path: string;
+	prefabAssetPath: string;
+	scene: string;
+	position: number[];
+	rotationEuler: number[];
+	localScale: number[];
+	children: UnityPrefabChild[];
+	bounds: UnityPrefabBounds;
+}
+
 /**
  * One candidate log location, probed rather than asserted.
  *
@@ -386,6 +486,188 @@ export interface UnityOpenSceneResult {
  * by the Hub (sandbox) or directly. Reporting a path without checking it would
  * send a reader to a file that is not there.
  */
+/**
+ * One measurement family `unity_geometry_probe` can run.
+ *
+ * `transform` catches unapplied/mirror scale, `bounds` the world-space volume
+ * each object occupies, `axis` the object's own thin/long axis and how far it
+ * sits off an expected one, `pair` the gap or overlap between two placed
+ * objects, `shape` the defects a render cannot show, and `topology` the
+ * expensive per-mesh defect counts.
+ */
+export type UnityGeometryProbeCheck = "transform" | "bounds" | "axis" | "pair" | "shape" | "topology";
+
+/**
+ * Bounds, with the caveat that produced them attached.
+ *
+ * `state` is load-bearing: a skinned renderer's bounds volume can read much
+ * larger than the mesh at rest, and `meshBounds.state` says the same of a
+ * transformed local box. A size reported without them reads as a measurement
+ * when it is really an upper bound.
+ */
+export interface UnityProbeBounds {
+	state: string;
+	size?: number[];
+	center?: number[];
+	min?: number[];
+	max?: number[];
+	/**
+	 * The mesh's own local box carried into world space. Absent when the mesh
+	 * is not readable, which is a different answer from a zero-size box.
+	 */
+	meshBounds?: {
+		state: string;
+		size: number[];
+		center: number[];
+		min: number[];
+		max: number[];
+		localSizeX: number;
+		localSizeY: number;
+		localSizeZ: number;
+	};
+}
+
+/**
+ * `transform.mirrorScale` is the one figure here nothing else reports: an
+ * object with a negative scale component looks correct and has inverted
+ * normals and winding, and `unity_scene_info` carries only `localScale`.
+ */
+export interface UnityProbeTransform {
+	position: number[];
+	rotationEuler: number[];
+	localScale: number[];
+	/** Accumulated scale through the parent chain, which can differ from localScale. */
+	lossyScale: number[];
+	/** Empty when the object is a scene root. */
+	parent: string;
+	unappliedScale: boolean;
+	nonUniformScale: boolean;
+	mirrorScale: boolean;
+	/** The single flipped component, or "" when the flip cannot be attributed to one. */
+	mirroredAxis: string;
+	state: string;
+}
+
+export interface UnityProbeAxis {
+	expectedAxis: string;
+	/** Present only when no mesh was found; the absence says why. */
+	state?: string;
+	measured?: {
+		state: string;
+		thinAxisLocal: number[];
+		thinAxisWorld: number[];
+		longAxisLocal: number[];
+		longAxisWorld: number[];
+		thinExtent: number;
+		longExtent: number;
+		/** Degrees between the object's thin axis and `expectedAxis`. */
+		thinAxisAngleToExpected: number;
+		longAxisAngleToExpected: number;
+		/** thinExtent / longExtent. Under 0.05 is ring- or tube-like. */
+		axisRatio: number;
+		isRingLike: boolean;
+		center: number[];
+		mirrorScale: boolean;
+		centerNote: string;
+	};
+}
+
+export interface UnityProbeSelfSymmetry {
+	/** The world axis the mesh is symmetric about, or "" when none qualifies. */
+	mirrorAxis: string;
+	deviationRatio?: number;
+	/** Explains an absent `deviationRatio`/`perAxis` on a mesh too small to test. */
+	state?: string;
+	perAxis?: Array<{
+		axis: string;
+		meanDeviation: number;
+		maxDeviation: number;
+		deviationRatio: number;
+	}>;
+}
+
+export interface UnityProbeShape {
+	vertices: number;
+	triangles?: number;
+	dimensions?: number[];
+	selfSymmetry?: UnityProbeSelfSymmetry;
+	convexity?: {
+		available: boolean;
+		/** Fraction of sampled vertices sitting on the mesh's own convex hull. */
+		convexityRatio: number;
+		sampledVertices?: number;
+		/** How far the worst interior vertex sits below the hull. */
+		deepestInsideHull?: number;
+		state: string;
+	};
+	openEdges?: number;
+	looseVertices?: number;
+	degenerateFaces?: number;
+	/** Present when symmetry and convexity ran on a subsample of the mesh. */
+	sampleNote?: string;
+	state?: string;
+}
+
+export interface UnityProbeTopology {
+	vertices: number;
+	triangles: number;
+	/** Edges shared by MORE than two faces. */
+	nonManifoldEdges: number;
+	/** Edges with exactly one face, i.e. the mesh is not closed there. */
+	boundaryEdges: number;
+	looseVertices: number;
+	degenerateFaces: number;
+	/** Vertices sharing a position to within 1e-5. Absent when not counted. */
+	duplicateVertices?: number;
+	/** Says whether the count is real, skipped for size, or a read failure. */
+	duplicateState?: string;
+	state?: string;
+}
+
+export interface UnityProbeObject {
+	name: string;
+	/** Scene path, the unambiguous handle for everything that follows. */
+	path: string;
+	/** The object the mesh came from, when it was not the named object itself. */
+	meshOwner?: string;
+	/** Why the mesh was found where it was, or why there is none. */
+	meshState?: string;
+	transform?: UnityProbeTransform;
+	bounds?: UnityProbeBounds;
+	axis?: UnityProbeAxis;
+	shape?: UnityProbeShape;
+	topology?: UnityProbeTopology;
+}
+
+export interface UnityProbePair {
+	/** Scene path of the first object. */
+	a: string;
+	/** Scene path of the second object. */
+	b: string;
+	verdict: "interpenetrating" | "in-contact" | "separated" | "unknown";
+	reason?: string;
+	tolerance: number;
+	closestSurfaceDistance?: number;
+	/** Positive depth of the deepest overlap, 0 when they do not overlap. */
+	deepestPenetration?: number;
+	/** Keyed by scene path, since two placed prefabs can share a name. */
+	verticesInsideTarget?: Record<string, number>;
+	sampledVertexCount?: Record<string, number>;
+	/** Signed per-axis overlap; a negative component means separated on that axis. */
+	boundingBoxOverlap?: { x: number; y: number; z: number };
+	state?: string;
+}
+
+export interface UnityGeometryProbeResult {
+	scene: string;
+	checks: UnityGeometryProbeCheck[];
+	tolerance: number;
+	expectedAxis: string;
+	unitNote: string;
+	objects: UnityProbeObject[];
+	pairs: UnityProbePair[];
+}
+
 export interface UnityLogCandidate {
 	path: string;
 	role: string;

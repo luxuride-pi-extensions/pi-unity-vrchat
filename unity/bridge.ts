@@ -395,6 +395,86 @@ export const requestLiveUnityExportSourceModels = (options: {
 	});
 
 /**
+ * Places a prefab asset into the active scene, in one call.
+ *
+ * Instantiate and place TOGETHER on purpose. Split across two calls, the caller
+ * has to name the object it just created, and that is the step that cannot be
+ * done reliably: a prefab's children repeat their names in every instance, so
+ * once the asset is placed twice a bare name is ambiguous -- and the resolver
+ * refuses ambiguity rather than guessing. The returned `path` is the stable
+ * handle for everything after this call.
+ */
+export const requestLiveUnityInstantiatePrefab = (options: {
+	prefabPath: string;
+	parent?: string;
+	name?: string;
+	position?: string;
+	rotation?: string;
+	scale?: string;
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnityPrefabInstanceResult>({
+		timeoutMs: options.timeoutMs,
+		payload: {
+			type: "instantiate-prefab",
+			prefabPath: options.prefabPath,
+			parent: options.parent ?? "",
+			name: options.name ?? "",
+			position: options.position ?? "",
+			rotation: options.rotation ?? "",
+			scale: options.scale ?? "",
+		},
+	});
+
+/**
+ * Reads a prefab asset WITHOUT instantiating it.
+ *
+ * The point is to know what placing it will do before the scene gains an object
+ * you then have to delete. `materials` here deliberately includes materials
+ * embedded in the source FBX, which `unity_scene_info { categories: ["materials"] }`
+ * cannot see -- for a model that arrived from Blender, that listing reporting
+ * nothing is not evidence the materials were lost.
+ */
+export const requestLiveUnityPrefabInfo = (options: {
+	prefabPath: string;
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnityPrefabInfo>({
+		timeoutMs: options.timeoutMs,
+		payload: { type: "prefab-info", prefabPath: options.prefabPath },
+	});
+
+/**
+ * Measures mesh/transform relationships and returns numbers.
+ *
+ * `timeoutMs` is a caller-supplied override rather than a raised default,
+ * because a probe scales with the size of the meshes it is pointed at: a
+ * `topology` pass walks every triangle of every named mesh, and only the caller
+ * knows whether the object list is one prop or a whole avatar.
+ */
+export const requestLiveUnityGeometryProbe = (options: {
+	objects?: string[];
+	pairs?: string[][];
+	checks?: import("./types.js").UnityGeometryProbeCheck[];
+	tolerance?: number;
+	expectedAxis?: "X" | "Y" | "Z";
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnityGeometryProbeResult>({
+		timeoutMs: options.timeoutMs,
+		payload: {
+			type: "geometry-probe",
+			// An empty list is the C# side's documented "probe everything with
+			// a mesh" behaviour, not an absent argument.
+			objects: options.objects ?? [],
+			pairs: options.pairs ?? [],
+			checks: options.checks ?? [],
+			tolerance: options.tolerance,
+			expectedAxis: options.expectedAxis,
+		},
+	});
+
+/**
  * Where the Editor's logs actually are.
  *
  * Asked of the live Editor rather than derived from a path, because the Editor

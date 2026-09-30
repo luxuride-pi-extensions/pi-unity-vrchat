@@ -116,6 +116,50 @@ namespace PiUnity
 					materials.CloseObject();
 				}
 				materials.CloseArray();
+				// FindAssets("t:Material") finds only material ASSETS. A material
+				// packed INSIDE a model file is a sub-asset and is invisible to it
+				// -- so for a model transferred from Blender, which is exactly where
+				// its materials live, this listing can be empty while the model is
+				// fully textured. Reporting only the asset materials made that read
+				// as "the materials were lost". These are the ones actually in use
+				// by something in the scene.
+				Json embedded = new Json();
+				embedded.OpenArray();
+				var embeddedSeen = new List<string>();
+				foreach (Renderer renderer in scene.GetRootGameObjects()
+					.SelectMany(root => root.GetComponentsInChildren<Renderer>(true)))
+				{
+					foreach (Material material in renderer.sharedMaterials)
+					{
+						if (material == null) continue;
+						string materialPath = AssetDatabase.GetAssetPath(material);
+						// A real .mat file is already in the listing above; only the
+						// sub-assets and built-ins it cannot reach are new here.
+						bool isStandaloneAsset = !string.IsNullOrEmpty(materialPath)
+							&& materialPath.EndsWith(".mat", StringComparison.OrdinalIgnoreCase);
+						if (isStandaloneAsset) continue;
+						string key = string.IsNullOrEmpty(materialPath) ? material.name : materialPath + "|" + material.name;
+						if (embeddedSeen.Contains(key)) continue;
+						embeddedSeen.Add(key);
+
+						embedded.OpenObject();
+						embedded.AddString("name", material.name);
+						// Empty means the material is embedded in the model asset
+						// rather than being a file of its own.
+						embedded.AddString("assetPath", materialPath);
+						embedded.AddString(
+							"kind",
+							string.IsNullOrEmpty(materialPath) ? "builtin" : "embeddedInModel");
+						embedded.AddString("parentAsset", materialPath);
+						embedded.AddString("shader", material.shader != null ? material.shader.name : "");
+						embedded.AddString("usedBy", renderer.gameObject.name);
+						string embeddedColor = FirstExisting(material, ColorProperties);
+						if (embeddedColor != null) embedded.AddArray("color", ColorToJson(material.GetColor(embeddedColor)));
+						embedded.CloseObject();
+					}
+				}
+				embedded.CloseArray();
+				result.AddValue("embeddedMaterials", embedded);
 				result.AddValue("materials", materials);
 			}
 
@@ -205,6 +249,17 @@ namespace PiUnity
 					assets.OpenObject();
 					assets.AddString("path", path);
 					assets.AddString("type", type != null ? type.Name : "");
+					// A prefab and a model are both main assets of type GameObject, so
+					// `type` alone cannot tell "place this with unity_instantiate_prefab"
+					// from "this is a model you already imported a prefab from".
+					bool isModel = path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase)
+						|| path.EndsWith(".obj", StringComparison.OrdinalIgnoreCase)
+						|| path.EndsWith(".dae", StringComparison.OrdinalIgnoreCase)
+						|| path.EndsWith(".blend", StringComparison.OrdinalIgnoreCase)
+						|| path.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase)
+						|| path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase);
+					assets.AddBool("isPrefab", !isModel && type == typeof(GameObject));
+					assets.AddBool("isModel", isModel);
 					assets.CloseObject();
 				}
 				assets.CloseArray();

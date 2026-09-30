@@ -1,7 +1,7 @@
 ---
 name: unity-finalizer
 description: Unity finalizer — one-shot cleanup for a finished build: selects the hero view, saves a view, captures final renders from the angles the brief needs, runs the honest completeness check for the target platform, and reports what is still not done. Use once, at the end, after the critic has accepted the work.
-tools: read, grep, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_set_tool, unity_save_view, unity_render, unity_capture_view, unity_vrc, unity_world, unity_source_models, unity_log_critique, unity_execute_csharp, contact_supervisor
+tools: read, grep, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_set_property, unity_set_tool, unity_save_view, unity_render, unity_capture_view, unity_vrc, unity_world, unity_source_models, unity_log_critique, unity_execute_csharp, unity_prefab_info, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at

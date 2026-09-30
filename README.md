@@ -214,6 +214,9 @@ build that skipped your code.
 | `unity_set_property` | Write one serialized property, parsed by the property's own type. Undoable. |
 | `unity_set_transform` | Move / rotate / scale a GameObject or a rig bone, in world or local space. Undoable. |
 | `unity_source_models` | Which real model **files** a selection resolves to. `find` reports, `export` copies them out for another application to open verbatim. |
+| `unity_prefab_info` | What a prefab **asset** contains — children, materials, bounds — read without instantiating it. |
+| `unity_instantiate_prefab` | Place a prefab asset into the scene, positioned, in one call. Returns the instance's scene path. |
+| `unity_geometry_probe` | **Measure** the scene: world bounds, thin/long axis vs an expected axis, closest-surface distance and interpenetration between a pair, non-manifold/loose/duplicate counts. Read-only, and the Unity counterpart to `blender_geometry_probe`. |
 | `unity_vrc` | **VRChat avatar** helpers: package/optimizer readiness, VRCFury, lilToon, bone paths. |
 | `unity_world` | **VRChat world** helpers: light volumes, Udon, scene descriptor. |
 | `unity_render` | Render through a **camera** with the real lighting and materials. |
@@ -237,6 +240,14 @@ lets it read `VRC_AvatarDescriptor`, lilToon, VRCFury, or a user's own
 `MonoBehaviour` — pi cannot know a package's field names ahead of time, and
 reflection would miss serialized private fields and `[HideInInspector]` ones. The
 walk sees exactly what a human sees in the Inspector.
+
+**A model transferred from Blender is a prefab asset, not scene geometry.** The
+transfer deliberately leaves it out of the scene, so composition is an explicit
+step: `unity_prefab_info` to see what placing it will add, then
+`unity_instantiate_prefab` to place it. Use the returned scene `path` afterwards —
+a prefab's children repeat their names in every instance, so a bare name is
+refused as ambiguous the moment the asset is placed twice, while `"Chair (2)/Leg"`
+resolves exactly. Every tool that takes `gameObject` accepts either form.
 
 **`unity_render` vs `unity_capture_view` is the single most important
 distinction.** `unity_render` tells you how the game will look from a camera.

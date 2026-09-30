@@ -67,8 +67,12 @@ namespace PiUnity
 			var roots = new List<GameObject>();
 			foreach (string name in names)
 			{
-				GameObject found = GameObject.Find(name);
-				if (found == null) found = FindGameObjectByName(name);
+				// FindGameObjectByName goes FIRST, not GameObject.Find. GameObject.Find
+				// returns the first hit under an ambiguous name, so putting it first
+				// silently defeated the refusal that helper exists to issue -- and a
+				// silently-wrong export is worse than a refused one.
+				GameObject found = FindGameObjectByName(name);
+				if (found == null) found = GameObject.Find(name);
 				if (found == null) throw new Exception("No GameObject named \"" + name + "\" in the active scene.");
 				roots.Add(found);
 			}

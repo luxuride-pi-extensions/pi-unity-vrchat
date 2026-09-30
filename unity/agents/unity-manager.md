@@ -27,7 +27,7 @@
 # This file is not installed as a child, so recording it there would claim a
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique, unity_prefab_info
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines.
@@ -147,6 +147,17 @@ convention is missing from this list it does not exist.
   addressed by Humanoid bone name. Use `unity_bones`, and `unity_set_transform`
   with `space: "local"` to place a bone relative to its parent. Always pass
   `bones` to filter — an avatar has 180+.
+- **Prefabs are assets, not scene objects.** A model that came from Blender
+  arrives as a prefab and is deliberately NOT in the scene. Compose with
+  `unity_prefab_info` (read what it contains, instantiate nothing) then
+  `unity_instantiate_prefab` (place it in one call, returns the instance's scene
+  path and child inventory). Use the returned `path` for every follow-up call: a
+  prefab placed twice repeats its children's names, so a bare name is then
+  ambiguous and every name-based tool refuses it rather than guessing.
+- **`space: "asset"`** writes through to the prefab source asset, so the change
+  reaches every instance; the default `scene` space edits this instance only.
+  An edit to an instance without it is a prefab override — recorded, but lost
+  when the prefab is reloaded.
 - **Component fields**: read them with `unity_inspect`, which walks
   SerializedObject and therefore sees exactly what the Unity Inspector shows,
   including serialized private and `[HideInInspector]` fields on types you have

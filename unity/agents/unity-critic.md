@@ -1,7 +1,7 @@
 ---
 name: unity-critic
 description: Unity render critic — judges modules/<name>/render.png against the brief, handles view/camera fixes, and reports session state. Read-only for edits; use a fresh one per module iteration.
-tools: read, unity_scene_info, unity_inspect, unity_bones, unity_vrc, unity_world, unity_log_critique, contact_supervisor, unity_save_view, unity_render, unity_session_context, unity_bridge_status
+tools: read, unity_scene_info, unity_inspect, unity_bones, unity_vrc, unity_world, unity_log_critique, contact_supervisor, unity_save_view, unity_render, unity_session_context, unity_bridge_status, unity_prefab_info
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at

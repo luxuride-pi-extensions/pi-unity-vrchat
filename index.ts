@@ -31,6 +31,9 @@ import {
 	requestLiveUnitySetTransform,
 	requestLiveUnityFindSourceModels,
 	requestLiveUnityExportSourceModels,
+	requestLiveUnityGeometryProbe,
+	requestLiveUnityInstantiatePrefab,
+	requestLiveUnityPrefabInfo,
 	unityCaptureView,
 	requestLiveUnityVrc,
 	requestLiveUnityWorld,
@@ -85,6 +88,13 @@ const UNITY_MANAGER_ROSTER = new Set([
 /**
  * Manager mode, entered ONLY by the /unity command.
  *
+ * A unity_* tool call does NOT enter it. `markUsed()` turns on the per-turn
+ * guidance injection, which is right for any turn that touches Unity; the gate
+ * stays down, because a session that was never handed a task is not a manager
+ * and must keep its `write` and `edit`. Before the split, probing
+ * `unity_bridge_status` silently cost a session both for the rest of it, with
+ * no way back but a slash command.
+ *
  * The mechanism — the engaged flag, the tool_call gate, and the exemption for a
  * subagent inside a manager session — is the shared core's, because all three
  * manager extensions had a private copy of it and they drifted. The refusals
@@ -120,6 +130,8 @@ const managerMode = core.createManagerMode({
 		"unity_source_models",
 		"unity_module_revert",
 		"unity_log_critique",
+		"unity_prefab_info",
+		"unity_geometry_probe",
 	],
 	// The roster's RULE is the core's; only the names are ours. This manager had
 	// no roster at all, so it could spawn any agent in the session — including a
@@ -252,10 +264,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityWorkspaceInit({
 				workspacePath: normalizeWorkspacePath(ctx.cwd, params.workspace),
 				template: params.template as "3d" | "blank" | undefined,
@@ -302,10 +316,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityExecuteCSharp({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -331,10 +347,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: params.workspace });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
@@ -357,10 +375,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await getSceneInfo({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -400,10 +420,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnityBones({
 				gameObject: params.gameObject,
 				bones: params.bones,
@@ -447,10 +469,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const names = params.gameObjectNames ?? [];
 			const result =
 				params.mode === "export"
@@ -459,6 +483,156 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 							gameObjectNames: names,
 						})
 					: await requestLiveUnityFindSourceModels({ gameObjectNames: names });
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_prefab_info",
+		label: "Unity Prefab Info",
+		description:
+			"What does this prefab ASSET contain, read WITHOUT instantiating it? Call this BEFORE placing one: it is the difference between knowing a prefab's contents and discovering them in a scene you then have to clean up. " +
+			"Returns the child hierarchy (names, scene paths, components, mesh vertex counts), every material the prefab references, and the bounds its geometry occupies. " +
+			"CRITICAL for transferred models: `materials` includes materials EMBEDDED in the source FBX, which unity_scene_info { categories: [\"materials\"] } cannot see -- FindAssets(\"t:Material\") skips material sub-assets, so for a model that arrived from Blender an empty materials list there is NOT evidence the materials were lost. " +
+			"Read `bounds.state` before trusting `bounds.size`: a skinned renderer's bounds volume can read far larger than the mesh at rest, and the state says so rather than leaving you to measure it yourself. " +
+			"prefabPath is ASSET-RELATIVE (\"Assets/...\", not absolute) -- get real paths from unity_scene_info { categories: [\"assets\"] }.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			prefabPath: Type.String({
+				description: 'Asset-relative prefab path, e.g. "Assets/PiImported/Chair.prefab". Not an absolute path.',
+			}),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			const result = await requestLiveUnityPrefabInfo({ prefabPath: params.prefabPath });
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_instantiate_prefab",
+		label: "Unity Instantiate Prefab",
+		description:
+			"Place a prefab asset into the active scene, positioned, in ONE call. This is the composition step: a transferred model arrives as a prefab asset (unity_blender_transfer creates it but deliberately does NOT add it to the scene), and this is what actually puts it in. " +
+			"Instantiate and place are one call on purpose. Split across two, you would have to name the object you just created -- and a prefab's children repeat their names in every instance, so the moment you place one twice a bare name is ambiguous and every name-based tool refuses it rather than guessing. " +
+			"The returned `path` is the stable handle: pass it to unity_inspect / unity_set_transform / unity_set_property, which accept a scene path (\"Parent/Child\") as well as a bare name. " +
+			"Use PrefabUtility.InstantiatePrefab semantics, so the instance stays LINKED to the asset: later edits to the prefab propagate, and PrefabUtility can report overrides. The name is made unique automatically (Chair, Chair (2), ...) when the asset is placed more than once. " +
+			"Pass `parent` to nest under an existing object. Writes to an instance become prefab OVERRIDES -- recorded via RecordPrefabInstancePropertyModifications, so they survive, but an override has no recorded base if you edit a component this tool did not touch.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			prefabPath: Type.String({
+				description: 'Asset-relative prefab path, e.g. "Assets/PiImported/Chair.prefab". Not an absolute path.',
+			}),
+			parent: Type.Optional(
+				Type.String({
+					description:
+						"Scene object to parent under, by name or scene path. Omit to place at the scene root.",
+				}),
+			),
+			name: Type.Optional(
+				Type.String({
+					description:
+						"Rename the instance. Omit to keep the prefab's name, made unique if the scene already has one.",
+				}),
+			),
+			position: Type.Optional(Type.String({ description: 'World position as "x,y,z". Default "0,0,0".' })),
+			rotation: Type.Optional(Type.String({ description: 'World rotation in Euler DEGREES as "x,y,z". Default "0,0,0".' })),
+			scale: Type.Optional(Type.String({ description: 'LOCAL scale as "x,y,z". Default "1,1,1".' })),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			const result = await requestLiveUnityInstantiatePrefab({
+				prefabPath: params.prefabPath,
+				parent: params.parent,
+				name: params.name,
+				position: params.position,
+				rotation: params.rotation,
+				scale: params.scale,
+			});
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_geometry_probe",
+		label: "Unity Geometry Probe",
+		description:
+			"Measure mesh/transform relationships in the live scene and return NUMBERS instead of guesses: world-space bounds, the object's own thin/long axis and how far it sits off an expected one, closest-surface distance between two placed objects with an interpenetrating/in-contact/separated verdict, and non-manifold/loose/duplicate geometry counts. " +
+			"READ-ONLY: it never mutates, never dirties or saves the scene, never writes an asset, and claims no iteration, so it is safe to call while a worker has a module mid-flight. " +
+			"What unity_scene_info cannot tell you: it reports only hasMesh/hasRenderer booleans per object, so a MIRRORED object (a negative scale component, which looks correct and has inverted normals and winding) is invisible there and is reported here as transform.mirrorScale. " +
+			"READ EVERY `state` FIELD before trusting a number -- several figures are approximations and say which: a skinned renderer's bounds volume can read much larger than the mesh at rest, the axis is derived from the mesh's LOCAL bounding box (exact only for an axis-aligned mesh), and a pair's 'inside' test is only meaningful on a CLOSED mesh. " +
+			"Omit `objects` to probe every active mesh root, which is usually right: a misplaced part is found by its relationship to the rest, and the culprit is often not yet known. `pairs` takes precedence over `objects` for that one family. " +
+			"An object name is resolved exactly -- a bare name two scene roots both contain is REFUSED, and a scene path (\"Chair (2)/Leg\") always works. A missing mesh, missing renderer or empty mesh is reported as a number with a `state`, never as an error.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			objects: Type.Optional(
+				Type.Array(Type.String(), {
+					description:
+						'Object names or scene paths to measure. Omit to probe every active mesh root in the scene. A bare name that is ambiguous is refused rather than guessed.',
+				}),
+			),
+			pairs: Type.Optional(
+				Type.Array(Type.Array(Type.String(), { minItems: 2, maxItems: 2 }), {
+					description:
+						'Object-name pairs to measure against each other, e.g. [["Mug", "MugHandle"]]. Each pair yields the closest surface distance, penetration depth, per-object vertex-inside counts, bounding-box overlap and a verdict. Takes precedence over `objects` for this family; omit to auto-pair when exactly two objects are given.',
+				}),
+			),
+			checks: Type.Optional(
+				Type.Array(
+					Type.Union([
+						Type.Literal("transform"),
+						Type.Literal("bounds"),
+						Type.Literal("axis"),
+						Type.Literal("pair"),
+						Type.Literal("shape"),
+						Type.Literal("topology"),
+					]),
+					{
+						description:
+							"Measurement families to run. Omit for all. `transform` catches unapplied and MIRROR scale; `bounds` is the world-space volume each object occupies; `axis` is the object's own thin/long axis and its angle to `expectedAxis`; `shape` reports self-symmetry, convexity and open edges -- the defects a render cannot show; `pair` is the gap or overlap between two placed objects; `topology` is the expensive one (a pass over every triangle of every named mesh) and is only needed when the shape itself is suspect.",
+						uniqueItems: true,
+					},
+				),
+			),
+			tolerance: Type.Optional(
+				Type.Number({
+					description:
+						"Contact distance in metres (default 0.002, i.e. 2 mm). A pair whose closest sampled surfaces are within tolerance reports as `in-contact` rather than `separated`.",
+					minimum: 0,
+				}),
+			),
+			expectedAxis: Type.Optional(
+				Type.Union([Type.Literal("X"), Type.Literal("Y"), Type.Literal("Z")], {
+					description:
+						"The world axis a part's thin direction should align with -- `Y` for a mug handle's ring axis, `Z` for a vertical stem. Defaults to Z; the returned angles are against this axis.",
+				}),
+			),
+			timeoutMs: Type.Optional(
+				Type.Number({
+					description:
+						"Bridge timeout override in ms. Raise it for a `topology` check on a heavy scene -- a probe scales with mesh size -- and lower it when probing a small object list and you want a dead bridge to report sooner.",
+				}),
+			),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			// Injection is a statement of INTENT, not of success: it is set
+			// before any work, so a tool that throws (bad argument, no editor)
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
+			const result = await requestLiveUnityGeometryProbe({
+				objects: params.objects,
+				pairs: params.pairs,
+				checks: params.checks,
+				tolerance: params.tolerance,
+				expectedAxis: params.expectedAxis,
+				timeoutMs: params.timeoutMs,
+			});
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -474,7 +648,10 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			workspace: Type.Optional(
 				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
 			),
-			gameObject: Type.String({ description: "GameObject name in the active scene. Call unity_scene_info for the list of roots." }),
+			gameObject: Type.String({
+				description:
+					'GameObject name in the active scene, or a scene path ("Chair (2)/Leg") when the name alone is ambiguous -- which is the normal state for a prefab placed more than once, since a prefab\'s children repeat their names in every instance. A bare name that two scene roots both contain is REFUSED rather than guessed. Call unity_scene_info for the list of roots.',
+			}),
 			component: Type.Optional(
 				Type.String({ description: "Component short or full type name to dump in full, e.g. \"VRC_AvatarDescriptor\"." }),
 			),
@@ -483,10 +660,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnityInspect({
 				gameObject: params.gameObject,
 				component: params.component,
@@ -520,10 +699,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnitySetProperty({
 				gameObject: params.gameObject,
 				component: params.component,
@@ -545,7 +726,10 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			workspace: Type.Optional(
 				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
 			),
-			gameObject: Type.String({ description: "GameObject name in the active scene." }),
+			gameObject: Type.String({
+				description:
+					'GameObject name in the active scene, or a scene path ("Chair (2)/Leg") when the name alone is ambiguous -- which is the normal state for a prefab placed more than once, since a prefab\'s children repeat their names in every instance. A bare name that two scene roots both contain is REFUSED rather than guessed, because silently inspecting the wrong object is worse than being told to be specific. Every tool that takes gameObject accepts both forms.',
+			}),
 			position: Type.Optional(Type.String({ description: "New position as \"x,y,z\"." })),
 			rotationEuler: Type.Optional(Type.String({ description: "New rotation as euler degrees \"x,y,z\"." })),
 			scale: Type.Optional(Type.String({ description: "New local scale as \"x,y,z\"." })),
@@ -557,10 +741,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnitySetTransform({
 				gameObject: params.gameObject,
 				position: params.position,
@@ -609,10 +795,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			child: Type.Optional(Type.String({ description: "path only: a bone or child name to resolve under the avatar." })),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnityVrc({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -667,10 +855,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await requestLiveUnityWorld({
 				action: params.action,
 				gameObject: params.gameObject,
@@ -697,10 +887,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			cameraName: Type.String({ description: "Name of the camera GameObject this view uses." }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const workspacePath = normalizeWorkspacePath(ctx.cwd, params.workspace);
 			await assertCameraExists(workspacePath, params.cameraName);
 			const result = await unitySaveView({
@@ -733,10 +925,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityRender({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -770,10 +964,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityCaptureView({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -811,10 +1007,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Explicit timeout in seconds.", default: 180 })),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityModuleRun({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -851,10 +1049,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityModuleRevert({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -874,10 +1074,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			tool: Type.String({ description: "Transform tool to activate." }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unitySetTool({ tool: params.tool });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
@@ -908,10 +1110,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			}),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = unityLogCritique({
 				cwd: ctx.cwd,
 				workspace: params.workspace,
@@ -939,10 +1143,12 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-			// Engagement is a statement of INTENT, not of success: it is set
+			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
-			// still leaves the session engaged and the guidance injected.
-			managerMode.markEngaged();
+			// still leaves the guidance flowing for the next turn. It does NOT
+			// raise the manager gate -- only /unity does that, because calling a
+			// tool is not a delegation.
+			managerMode.markUsed();
 			const result = await unityBridgeStatus();
 			const details = { ...result, requestedWorkspace: params.workspace };
 			return { content: [{ type: "text", text: formatJsonResult(details) }], details };

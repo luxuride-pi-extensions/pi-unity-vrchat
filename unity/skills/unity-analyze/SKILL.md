@@ -17,13 +17,21 @@ cameras, lights, renderSettings). Add sections deliberately:
 | --- | --- |
 | What's in the scene? | `objects` (includes world + local transform, tag, layer, prefab) |
 | Where is this bone? | `unity_bones` — a bone is not a GameObject |
-| What's on this component? | `unity_inspect` — every serialized property |
-| Why does it look wrong? | `materials`, `renderSettings` |
+| What's on this object? | `unity_inspect` — every serialized property |
+| Why does it look wrong? | `materials`, `embeddedMaterials`, `renderSettings` |
 | What render pipeline / packages? | `packages` |
 | Why is my type missing? | `compileStatus` |
-| What's actually in the project folder? | `assets` |
+| What's actually in the project folder? | `assets` — each row says `isPrefab` / `isModel` |
+| What's IN this prefab, before placing it? | `unity_prefab_info` — read-only, instantiates nothing |
 
 `packages` and `assets` are the slow ones. Everything else is fast.
+
+`unity_prefab_info` is how you answer "what will this prefab actually add to my
+scene" without adding it. It reports the child hierarchy, every material, and
+the bounds — which matters for a model that came from Blender, because the
+`materials` category lists standalone `.mat` files only and a transferred model's
+materials are sub-assets of the FBX. An empty `materials` there is not evidence
+they were lost; `embeddedMaterials`, or `unity_prefab_info`, is where they are.
 
 `unity_bones` and `unity_inspect` are read-only. `unity_bones` is how you answer
 "where is the left hand" on a rigged avatar — a VRChat avatar is not scene
@@ -32,6 +40,15 @@ geometry, the rig lives inside the prefab and is addressed by Humanoid bone name
 the Inspector displays it, which is the only way to inspect a package type
 (`VRC_AvatarDescriptor`, lilToon, VRCFury) whose fields you cannot know in
 advance.
+
+### Naming an object reliably
+
+Every tool that takes an object also accepts a **scene path** —
+`"Chair (2)/Leg"`, not a bare `Leg`. A bare name is refused when it is ambiguous
+across scene roots, and a prefab placed more than once guarantees that ambiguity
+for its children. Reach for the path whenever you have one; the child listing
+`unity_prefab_info` and `unity_instantiate_prefab` return gives you every path
+you need.
 
 ### VRChat projects
 

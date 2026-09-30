@@ -1,7 +1,7 @@
 ---
 name: unity-worker
 description: Unity module worker — owns exactly one module's script.cs, runs it through the live Editor, and reports back. One fresh worker per module.
-tools: read, write, edit, unity_module_run, unity_module_revert, unity_scene_info, unity_bones, unity_inspect, unity_vrc, unity_world, unity_session_context, unity_render, unity_bridge_status, contact_supervisor
+tools: read, write, edit, unity_module_run, unity_module_revert, unity_scene_info, unity_bones, unity_inspect, unity_vrc, unity_world, unity_session_context, unity_render, unity_bridge_status, unity_prefab_info, unity_instantiate_prefab, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at
@@ -43,6 +43,12 @@ criteria, workspace path, module name. Work only inside
   addressed by Humanoid bone name), and `unity_inspect` to read a component's
   serialized fields when you need to know what you are editing. Both answer
   questions C# reflection would get wrong on a package type.
+- **To place a prefab**, use `unity_prefab_info` then
+  `unity_instantiate_prefab` — not a snippet with `Object.Instantiate`, which
+  silently produces a detached copy that never updates when the asset changes.
+  Take the returned `path` and use it for later calls; prefab children repeat
+  their names per instance, so a bare name gets refused once you place the asset
+  twice.
 - In a VRChat project, `unity_vrc` / `unity_world` are the only tools that know
   about the package set. Use the read-only actions (`vrc action=project`,
   `optimizer`, `vrcfury-list`, `liltoon-usage`, `world action=scene`,

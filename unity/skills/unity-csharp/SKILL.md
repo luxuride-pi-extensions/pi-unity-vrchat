@@ -107,6 +107,60 @@ else if (!go.TryGetComponent<Light>(out _))
 A script that is not idempotent produces a scene with four lamps after three
 runs, and the mistake is attributed to Unity.
 
+## Prefabs and composition
+
+A model that arrived from Blender is a **prefab asset**, not scene geometry, and
+the transfer deliberately does not place it. Composing a scene from prefabs is
+what `unity_prefab_info` and `unity_instantiate_prefab` are for — prefer them over
+a snippet:
+
+```csharp
+// not this
+var asset = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PiImported/Chair.prefab");
+Object.Instantiate(asset);              // detached copy, asset link lost
+PrefabUtility.InstantiatePrefab(asset); // linked instance, overrides reportable
+```
+
+`Object.Instantiate` on a prefab produces an object that looks identical and is
+disconnected: a later edit to the asset does not reach it, and `PrefabUtility`
+cannot report its overrides. If a snippet must instantiate, use
+`PrefabUtility.InstantiatePrefab`.
+
+Four things bite in a snippet, all silent:
+
+- **Placing one asset twice makes child names ambiguous.** A prefab's children
+  repeat their names in every instance, so `GameObject.Find("Leg")` on the second
+  instance hits the first. Every name-taking tool *refuses* an ambiguous name
+  rather than guessing. Pass a scene path — `"Chair (2)/Leg"` — not a bare name.
+  `unity_instantiate_prefab` returns that path for you.
+- **A rename or a reparent on a fresh instance is an override**, and an override
+  with nothing recorded as its base is discarded by the next Apply. Call
+  `PrefabUtility.RecordPrefabInstancePropertyModifications(transform)`.
+- **An asset write needs the ASSET, not the instance.** `GetAssetPath(component)`
+  is empty for anything in a scene, so `AssetDatabase.SaveAssetIfDirty(instance)`
+  is a no-op that reports success. Use `GetCorrespondingObjectFromSource`.
+- **`AssetDatabase.FindAssets("t:Material")` cannot see materials inside a
+  model.** They are sub-assets. Use `unity_prefab_info`'s `materials`, which does.
+
+`unity_instantiate_prefab` does all four correctly and returns the child's
+inventory plus world bounds, which is the only thing that answers "is this the
+right size where I put it".
+
+## Naming objects you cannot predict
+
+Prefab-derived names are rarely unique. Do not assume a name you chose will still
+be the name after a second instance:
+
+```csharp
+string UniqueName(string wanted)
+{
+    if (GameObject.Find(wanted) == null) return wanted;
+    for (int i = 2; i < 1000; i++)
+        if (GameObject.Find($"{wanted} ({i})") == null) return $"{wanted} ({i})";
+    return wanted + " (" + Guid.NewGuid().ToString("N")[..6] + ")";
+}
+```
+
 ## Long operations
 
 `AssetDatabase.Refresh`, `EditorUtility.DisplayDialog`, and anything that opens a

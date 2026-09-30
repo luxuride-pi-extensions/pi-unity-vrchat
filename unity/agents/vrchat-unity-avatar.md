@@ -1,7 +1,7 @@
 ---
 name: vrchat-unity-avatar
 description: VRChat avatar specialist — authors and runs one module against a live VRChat avatar project: blendshapes and visemes, physbones and colliders, VRCFury elements, Modular Avatar pieces, Quest conversion, upload readiness and the 70000 vertex budget. Spawn instead of a general unity-worker when the task is inherently about a VRChat avatar.
-tools: read, write, edit, grep, unity_module_run, unity_module_revert, unity_scene_info, unity_bones, unity_inspect, unity_set_property, unity_set_transform, unity_vrc, unity_session_context, unity_render, unity_bridge_status, contact_supervisor
+tools: read, write, edit, grep, unity_module_run, unity_module_revert, unity_scene_info, unity_bones, unity_inspect, unity_set_property, unity_set_transform, unity_vrc, unity_session_context, unity_render, unity_bridge_status, unity_prefab_info, unity_instantiate_prefab, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at

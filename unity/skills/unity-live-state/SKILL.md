@@ -34,6 +34,12 @@ mostly irrelevant to a turn. When you need them, ask:
 | Where is this **bone**? | `unity_bones { gameObject, bones: [...] }` — a bone is not a GameObject; the rig lives inside the prefab |
 | What is on this component? | `unity_inspect { gameObject, component }` — every serialized property, like the Inspector |
 | Where is this bone relative to its parent? | `unity_set_transform` reads back both spaces; the `head` of an arm is a local offset, not a world point |
+| What is in the selected prefab before placing it? | `unity_prefab_info { prefabPath }` — read-only, adds nothing to the scene |
+
+"it" and "this" name an object by what the state block says, but you still have
+to hand the tool something it can resolve. A **scene path**
+(`"Chair (2)/Leg"`) is always safe; a bare name is refused when two scene roots
+contain it, which is the normal state for a prefab placed more than once.
 
 Do not infer a position from a previous turn's `unity_scene_info` either. If
 something was moved, read it again.
