@@ -27,7 +27,7 @@
 # This file is not installed as a child, so recording it there would claim a
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list.
-tools: subagent, subagents_enable, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines.
@@ -244,6 +244,38 @@ is a retry wearing a question's clothes.
    what was built, and the open questions you did not resolve. There is no
    parent agent to hand a summary up to, and no intermediate session the user
    would have to open to find it.
+
+## Waiting for a child, and answering one
+
+Two tools, and the mistake is treating them as one.
+
+`bg_wait` blocks this turn until a background run finishes. An ordinary async
+`subagent` run already reports back on its own, and this session is woken when
+it does — so **do not call `bg_wait` merely to wait for one.** Reach for it
+only when the answer is needed *in this turn*: you are about to write the next
+brief and it depends on a number only that run can produce, you are deciding
+whether to stop iterating, or you are reporting to the user and a half-finished
+module would make the report a lie. `{all: true}` waits for every run going;
+`{id: "..."}` for one.
+
+Never busy-poll. A turn that re-reads a child's status file pays full context
+price for a one-line answer, and a child that has not finished will not have
+finished on the next poll either.
+
+Unity sharpens the reason: a worker here holds the Editor's main thread for
+minutes at a time, so a parallel poll returns "still busy" for a long stretch
+and teaches you nothing between attempts. `{timeoutMs: 1800000}` is a normal
+wait, not a bug.
+
+`subagent_supervisor` is the other direction: a worker that needs a decision
+asks upward, and only this session can answer. Call it with `action: "pending"`
+when a child reports it is stuck, and reply with `action: "reply"` carrying the
+`replyTo` and the answer. If `pending` is empty, the request may be owned by an
+external intercom tool — check there before assuming the child lied.
+
+Answer with a decision, not a reassurance. "Reuse the `Avatar` root and skip
+the rig module" is answerable; "be careful" restates the brief the child
+already has.
 
 ## Track the plan in `todo` — this is not optional
 

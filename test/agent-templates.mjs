@@ -17,11 +17,12 @@
  * HONEST LIMITS, because a test that overstates what it proves is worse than no
  * test:
  *  - Tools that come from pi-subagents or the todo package (`subagent`,
- *    `contact_supervisor`, `subagents_enable`, `todo`) are not registered by
- *    any extension we can load, so they cannot be verified by SET membership.
- *    They are whitelisted as AMBIENT, and `todo` additionally gets a dedicated
- *    structural check, because that is the one whose provider is a host path
- *    that silently goes missing.
+ *    `contact_supervisor`, `subagents_enable`, `bg_wait`,
+ *    `subagent_supervisor`, `todo`) are not registered by any extension we can
+ *    load, so they cannot be verified by SET membership. They are whitelisted
+ *    as AMBIENT, and `todo` additionally gets a dedicated structural check,
+ *    because that is the one whose provider is a host path that silently goes
+ *    missing.
  *  - This reads the TEMPLATES, which carry the `__PI_*__` placeholders. It
  *    verifies what the installer is asked to produce, not the installed
  *    result; `test/install-agents.mjs` covers the substitution.
@@ -55,6 +56,8 @@ const AMBIENT_TOOLS = new Set([
 	"subagent",
 	"contact_supervisor",
 	"subagents_enable",
+	"bg_wait",
+	"subagent_supervisor",
 	"todo",
 	"read",
 	"write",

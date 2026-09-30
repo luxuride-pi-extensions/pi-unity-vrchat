@@ -93,10 +93,13 @@ const UNITY_MANAGER_ROSTER = new Set([
  */
 const managerMode = core.createManagerMode({
 	allowedTools: [
-		// Delegation and supervision: without these the manager cannot do the
-		// one thing its prompt tells it to do.
+		// Delegation, supervision, and the two halves of waiting: bg_wait
+		// blocks on this session's own async runs, subagent_supervisor answers
+		// a child that needs a decision. Both belong to pi-subagents.
 		"subagent",
 		"subagents_enable",
+		"bg_wait",
+		"subagent_supervisor",
 		"contact_supervisor",
 		// Planning and reading agent definitions to write a brief with.
 		"todo",
