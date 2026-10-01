@@ -140,6 +140,16 @@ convention is missing from this list it does not exist.
   asset import and script compilation, so the first request after a launch can
   take 1-3 minutes. Check `unity_bridge_status` rather than assuming a call is
   stuck.
+- **Never tell a worker to wait out a compile with a sleep.** A script compile
+  takes 4-6 minutes, longer than any bridge call may wait, so a sleep is a guess
+  — and a sleep that is too short returns a compile status that is
+  indistinguishable from a clean one. The worker requests the compile in one
+  short call, then calls `unity_await_compile`, which blocks until the Editor
+  settles and returns the compiler's verdict. The wait cannot live inside the
+  bridge: the poll runs on the Editor's main thread, which is the thread the
+  compile needs in order to finish. `status: "timeout"` is the ABSENCE of a
+  verdict, not a verdict — tell the worker to call it again with a larger
+  `timeoutMs` rather than to go and look, and never treat it as clean.
 - **Positions**: `unity_scene_info { categories: ["objects"] }` carries world
   AND local position, rotation and scale per object, so "where is this object"
   needs no second call.

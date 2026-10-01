@@ -246,8 +246,11 @@ it; what it does NOT do is open the package's window.
 **Writing UdonSharp SOURCE is still a human job, but adding the behaviour is
 not.** A new `.cs` needs the author to write it, and the compile that proves it
 takes 4-6 minutes in a project of this size, which is longer than a bridge call
-may wait — so request the compile in one short call, then read `compile-status`
-in another. But once the script exists, `create-behaviour` places it properly:
+may wait. So request the compile in one short call and then **call
+`unity_await_compile`, which blocks until the Editor settles and returns the
+verdict** — do not sleep for a guessed duration and re-read `compile-status`,
+because a sleep that is too short returns a report that looks exactly like a
+clean one. Once the script exists, `create-behaviour` places it properly:
 it creates the UdonSharp **program asset** when the script has none (a script you
 wrote by hand does not get one automatically, and without it the package throws
 a bare `NullReferenceException` from several frames down), and it copies the

@@ -37,6 +37,7 @@ import {
 	unityCaptureView,
 	requestLiveUnityVrc,
 	requestLiveUnityWorld,
+	requestLiveUnityAwaitCompile,
 	unityBridgeStatus,
 	unityExecuteCSharp,
 	unityLogCritique,
@@ -365,7 +366,8 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			"Inspect the live Unity scene and project. Narrow it with `categories` instead of dumping everything: " +
 			`${UNITY_SCENE_INFO_CATEGORIES.join(", ")}. The default omits packages and assets, which are slow and large. ` +
 			"`compileStatus` is the one worth reading before you believe a build: `errors` carries the compiler's own `error CS…` lines, " +
-			"and `scriptsNeedingCompile` lists scripts newer than the last successful build -- both empty means the code on disk is compiled.",
+			"and `scriptsNeedingCompile` lists scripts written after the last compile the Editor finished -- both empty means the code on disk is compiled. " +
+			"Do not sleep and re-read this to wait out a compile; unity_await_compile blocks until the Editor settles and returns the verdict.",
 		parameters: Type.Object({
 			workspace: Type.Optional(
 				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
@@ -1355,6 +1357,36 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			const result = await unityBridgeStatus();
 			const details = { ...result, requestedWorkspace: params.workspace };
 			return { content: [{ type: "text", text: formatJsonResult(details) }], details };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_await_compile",
+		label: "Unity Await Compile",
+		description:
+			"Block until the live Editor's script compilation has FINISHED, then return the compiler's verdict. " +
+			"Call this after you change or create a C# script instead of sleeping and re-reading compile status: " +
+			"a script compile takes 4-6 minutes, which outlasts any single bridge request, and a sleep long enough " +
+			"to be safe is a guess -- a sleep too short returns a status that looks identical to a clean one. " +
+			"Returns status compiled | failed | timeout. `timeout` is the ABSENCE of a verdict, not a build " +
+			"result: `source` is then \"none\" and nothing is reported as compiled -- call it again with a " +
+			"larger timeoutMs rather than treating it as a build. `compileInFlight` distinguishes a compile " +
+			"still running from one that never started. " +
+			"A dead or unresponsive Editor raises instead, rather than being reported as a clean build.",
+		parameters: Type.Object({
+			timeoutMs: Type.Optional(
+				Type.Number({
+					description: "Budget for the compile in ms. Default 600000 (10 min), which covers a 4-6 min full compile.",
+				}),
+			),
+		}),
+		execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+			managerMode.markUsed();
+			const result = await requestLiveUnityAwaitCompile({
+				timeoutMs: params.timeoutMs,
+				signal,
+			});
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
 

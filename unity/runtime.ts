@@ -42,6 +42,8 @@ export {
 } from "./module.js";
 
 export {
+	requestLiveUnityAwaitCompile,
+	LIVE_BRIDGE_AWAIT_COMPILE_TIMEOUT_MS,
 	requestLiveUnityBones,
 	requestLiveUnityImportFbx,
 	requestLiveUnityExportObj,
@@ -64,6 +66,7 @@ export {
 	UNITY_SCENE_INFO_CATEGORIES,
 	UNITY_SCENE_INFO_DEFAULT_CATEGORIES,
 	UNITY_TOOLS,
+	type UnityAwaitCompileResult,
 	type UnityBone,
 	type UnityBonesResult,
 	type UnityComponentInfo,

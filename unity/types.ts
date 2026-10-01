@@ -325,8 +325,29 @@ export interface UnityCompileStatus {
 	 */
 	errors: string[];
 	errorCount: number;
-	/** Scripts newer than the last successful build, so their code is not compiled yet. */
+	/**
+	 * Which of the two diagnostic paths answered.
+	 *
+	 * `event` is the compiler's own output, captured from
+	 * `assemblyCompilationFinished` -- authoritative, because it belongs to the
+	 * compile that actually ran. `log` is a parse of the Editor log tail, used
+	 * when no capture exists: a compile that began before this Editor session
+	 * could observe it, or a capture that could not be read. `none` means
+	 * neither, so an empty `errors` array there is the absence of evidence
+	 * rather than evidence of a clean compile.
+	 */
+	source: "event" | "log" | "none";
+	/** Scripts written after the last compile cycle the Editor finished, so their code is not in the build. */
 	scriptsNeedingCompile: string[];
+	/**
+	 * Whether those scripts exist -- NOT a statement by the compiler. It is a
+	 * timestamp comparison, and on Unity 2022.3 it cannot be a fact about
+	 * compilation: the build keys on content hashes, so touching a file without
+	 * changing a byte rebuilds no assembly and leaves its output's mtime where
+	 * it was. It is kept because the case it was written for is real -- a
+	 * project whose every script is broken logs its errors once and then never
+	 * again, so an empty error list would report it as clean.
+	 */
 	needsCompile: boolean;
 	/** Where the compiler's messages were read from, so a reader can go and look. */
 	logPath: string;
@@ -355,6 +376,41 @@ export interface UnitySceneInfo {
 	packages?: UnityPackageInfo[];
 	assets?: UnityAssetInfo[];
 	compileStatus?: UnityCompileStatus;
+}
+
+export interface UnityAwaitCompileResult {
+	/**
+	 * `compiled` only when the compiler reported no errors. `failed` when it
+	 * reported some. `timeout` when the Editor never finished a compile inside
+	 * the budget, which is NOT a pass and NOT a build result: it is the absence
+	 * of a verdict, and `source` is `none` to say so.
+	 */
+	status: "compiled" | "failed" | "timeout";
+	errors: string[];
+	warnings: string[];
+	/**
+	 * Where the diagnostics came from, for the same reason compile-status reports
+	 * it. `event` is the compiler's own output; `log` is the Editor.log parse,
+	 * used when no compile was captured; `none` means nothing answered and the
+	 * arrays carry the last compile's output rather than a verdict.
+	 */
+	source: "event" | "log" | "none";
+	waitedMs: number;
+	/**
+	 * Whether the Editor's heartbeat moved during the wait. Deliberately NOT
+	 * checked while waiting -- a domain reload and a compile both hold the main
+	 * thread, so silence there is expected -- which is why it is reported as a
+	 * fact instead of being used to abort. False means the Editor looks stuck or
+	 * gone; run unity_bridge_status to tell those apart.
+	 */
+	editorResponding: boolean;
+	/**
+	 * True when the plugin recorded a compile CYCLE START after this call began
+	 * and the budget ran out before it finished. Distinguishes "Unity is still
+	 * compiling, just slower than the budget" from "nothing is happening", which
+	 * are the same result otherwise. Always false when status is not "timeout".
+	 */
+	compileInFlight?: boolean;
 }
 
 export interface UnityRenderResult {

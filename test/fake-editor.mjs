@@ -16,7 +16,7 @@
  *   { "sceneDirty": true, "delayMs": 0 }
  */
 
-import { readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const bridgeDir = process.argv[2];
@@ -29,6 +29,25 @@ const requestsDir = join(bridgeDir, "requests");
 const responsesDir = join(bridgeDir, "responses");
 const heartbeatPath = join(bridgeDir, "heartbeat");
 const controlPath = join(bridgeDir, "control.json");
+const compileMessagesPath = join(bridgeDir, "compile-messages.json");
+const captureTimers = [];
+
+/**
+ * What OnAssemblyCompilationFinished writes: the compiler's own output, to a
+ * file, because the domain reload at the end of a compile discards statics.
+ */
+function writeCompileMessages(completed = true, assembly = "Library/ScriptAssemblies/Assembly-CSharp-Editor.dll") {
+	writeFileSync(
+		compileMessagesPath,
+		JSON.stringify({
+			finishedAt: new Date().toISOString(),
+			assembly,
+			completed,
+			errors: completed ? state.compileErrors : [],
+			warnings: completed ? state.compileWarnings : [],
+		}),
+	);
+}
 
 // A real Editor touches its heartbeat every poll; isLiveBridgeAlive() treats a
 // heartbeat older than 10 s as "the Editor is gone", so this must stay fresh.
@@ -41,13 +60,35 @@ function touchHeartbeat() {
 	}
 }
 touchHeartbeat();
-const heartbeatTimer = setInterval(touchHeartbeat, 300);
+const heartbeatTimer = setInterval(() => {
+	if (state.freezeHeartbeat) return;
+	touchHeartbeat();
+}, 300);
 
 const state = {
 	/** Behave like an Editor holding unsaved scene changes. */
 	sceneDirty: false,
 	/** Stall each handler, so timeout and withdraw-on-timeout can be tested. */
 	delayMs: 0,
+	/**
+	 * Freeze the heartbeat, which models an Editor that has stopped replying --
+	 * hung, or reloading its domain around a compile. It must never SETTLE a
+	 * wait, because the plugin touches it on every poll whether or not a compile
+	 * is running; what the await reports from it is `editorResponding`.
+	 */
+	freezeHeartbeat: false,
+	/** Write the plugin's captured compiler output, as OnAssemblyCompilationFinished does. */
+	writeCompileMessages: false,
+	/** The compiler errors the capture reports; empty means a clean compile. */
+	compileErrors: [],
+	compileWarnings: [],
+	/**
+	 * Report needsCompile even though a capture naming an assembly exists,
+	 * which is the real shape of the regression: a script touched with
+	 * unchanged content never moves its assembly's timestamp, so a
+	 * timestamp-based proxy keeps calling it uncompiled.
+	 */
+	compileStatusStale: false,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,16 +113,30 @@ const HANDLERS = {
 	// 0 for a flat array of strings), so the double states 1 here instead of
 	// deriving it from errors.length -- a derived value would make a test pass
 	// on the very C# bug the field exists to catch.
-	"compile-status": () => ({
-		isCompiling: false,
-		lastError: "",
-		errors: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs(132,47): error CS0246: The type or namespace name 'VRCPlayerApi' could not be found"],
-		errorCount: 1,
-		scriptsNeedingCompile: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs"],
-		needsCompile: true,
-		logPath: "/tmp/fake-unity3d/Editor.log",
-		projectPath: "/tmp/fake-project",
-	}),
+	// Mirrors CompileStatusJson: a readable capture answers, and the log parse
+	// only does when there is none. Whether the capture exists is decided by the
+	// FILE, because that is what the real plugin decides it by -- and it is what
+	// the await path inspects before ever asking.
+	"compile-status": () => {
+		const captured = existsSync(compileMessagesPath);
+		// compileStatusStale models the state the regression lived in: a
+		// capture that names an assembly, and a needsCompile that still claims
+		// a script has never been built. Real, measured -- a script touched
+		// with unchanged content never moves its assembly's timestamp, because
+		// Bee keys the build on content hashes.
+		const stale = state.compileStatusStale === true;
+		return {
+			isCompiling: false,
+			lastError: "",
+			errors: captured ? state.compileErrors : ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs(132,47): error CS0246: The type or namespace name 'VRCPlayerApi' could not be found"],
+			errorCount: captured ? state.compileErrors.length : 1,
+			source: captured ? "event" : "log",
+			scriptsNeedingCompile: stale || !captured ? ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs"] : [],
+			needsCompile: stale || !captured,
+			logPath: "/tmp/fake-unity3d/Editor.log",
+			projectPath: "/tmp/fake-project",
+		};
+	},
 
 	"get-session-context": () => ({
 		projectPath: "/tmp/fake-project",
@@ -392,11 +447,50 @@ const controlTimer = setInterval(() => {
 	} catch {
 		// ignore
 	}
+	// The capture is written out of band, not from a handler: the await path
+	// checks the FILE before it asks anything, so a capture that only appeared
+	// during the compile-status request would arrive too late to be waited on.
+	//
+	// Only when the command TURNS IT ON. A real compile writes this file once,
+	// when the compiler finishes; re-writing it on every tick would leave its
+	// timestamp permanently "just now", which is exactly the thing the await
+	// path uses its timestamp to decide, and the fake would then be testing a
+	// condition Unity never produces.
+	if (command.writeCompileMessages === true) {
+		// One-shot, so a later command can turn it on again for a second compile.
+		state.writeCompileMessages = false;
+		writeCompileMessages();
+	} else if (typeof command.captureInMs === "number") {
+		// A compile takes time, so the capture lands DURING a wait rather than
+		// before it. Writing it eagerly would test a stale file instead -- which
+		// the await path is specifically required to refuse.
+		//
+		// The cycle marker comes first, exactly as the plugin writes it: a
+		// compile is recorded the moment it BEGINS, so a wait that settles on
+		// any new file would answer while the compiler was still running.
+		//
+		// Timers from an earlier command are cancelled first. A real compile
+		// writes this file once, and a leftover one-shot from the previous test
+		// would fire during this one and answer for it.
+		for (const pending of captureTimers) clearTimeout(pending);
+		captureTimers.length = 0;
+		const schedule = (fn, ms) => captureTimers.push(setTimeout(fn, ms));
+
+		const delay = command.captureInMs;
+		schedule(() => writeCompileMessages(false, ""), delay);
+		if (command.captureNeverFinishes === true) return;
+		// A cycle Unity built no assembly for finishes with the compiler's own
+		// verdict absent rather than with the file left at its start state:
+		// compilationFinished fires for it, and that is the only evidence the
+		// wait has.
+		schedule(() => writeCompileMessages(true, command.captureAssembly || ""), delay + 200);
+	}
 }, 100);
 
 function shutdown() {
 	stopping = true;
 	clearInterval(heartbeatTimer);
+	for (const pending of captureTimers) clearTimeout(pending);
 	clearInterval(controlTimer);
 	process.exit(0);
 }

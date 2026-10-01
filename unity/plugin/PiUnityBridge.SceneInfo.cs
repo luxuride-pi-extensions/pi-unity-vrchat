@@ -288,7 +288,19 @@ namespace PiUnity
 			status.AddString("lastError", LastCompileError);
 			// The full set, because "first error" alone leaves a caller fixing
 			// one problem at a time when the compiler already said all of them.
-			var errors = CompileErrorMessages();
+			//
+			// The compiler's own event output wins when it exists: it is what
+			// Unity itself produced, and unlike the log it cannot be a line that
+			// a fixed compile left behind. The log parse stays as the fallback
+			// for a compile that began before this Editor session could observe
+			// it, and a capture we cannot read falls back to it rather than
+			// reporting the absence of errors.
+			string[] captured = CapturedCompileErrors();
+			string source = captured != null ? "event" : (CompilerMessagesCaptured() ? "log" : "none");
+			List<string> errors = new List<string>();
+			if (captured != null) errors.AddRange(captured);
+			else errors.AddRange(CompileErrorMessages());
+			status.AddString("source", source);
 			var messages = new Json();
 			messages.OpenArray();
 			foreach (string message in errors) messages.AddString(message);

@@ -15,11 +15,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getUnityBridgeDir } from "../config.js";
-import { ensureUnityLaunched, isLiveBridgeAlive } from "../launch.js";
+import {
+	ensureUnityLaunched,
+	isLiveBridgeAlive,
+	LIVE_BRIDGE_HEARTBEAT_FILE,
+} from "../launch.js";
 import type { UnityBridgeRequest } from "./types.js";
 import {
 	acquireBridgeLock,
@@ -534,6 +538,264 @@ export const requestLiveUnityLog = (options: { timeoutMs?: number } = {}) =>
 		timeoutMs: options.timeoutMs,
 		payload: { type: "get-log" },
 	});
+
+/** The plugin's captured compiler output, named in Core.Configure. */
+const COMPILER_MESSAGES_FILE = "compile-messages.json";
+
+/**
+ * What one of the plugin's compile handlers wrote, read without throwing.
+ *
+ * The plugin's OWN finishedAt is preferred over the file's mtime, because a
+ * copy or a backup can move the file without anything having compiled.
+ *
+ * `completed` is what makes this usable as a verdict rather than a ping: the
+ * cycle-start marker is written the moment a compile begins, so a file that
+ * exists and is newer than the wait says nothing except that a compile started.
+ */
+const readCapture = (
+	path: string,
+): {
+	finishedAtMs: number;
+	completed: boolean;
+	assembly: string;
+	errors: string[];
+	warnings: string[];
+} | null => {
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+			finishedAt?: string;
+			completed?: unknown;
+			assembly?: unknown;
+			errors?: unknown;
+			warnings?: unknown;
+		};
+		const finishedAt = Date.parse(parsed.finishedAt ?? "");
+		return {
+			finishedAtMs: Number.isNaN(finishedAt) ? mtimeOf(path) ?? 0 : finishedAt,
+			completed: parsed.completed === true,
+			assembly: typeof parsed.assembly === "string" ? parsed.assembly : "",
+			errors: Array.isArray(parsed.errors) ? (parsed.errors as string[]) : [],
+			warnings: Array.isArray(parsed.warnings) ? (parsed.warnings as string[]) : [],
+		};
+	} catch {
+		return null;
+	}
+};
+
+/** How often the plugin re-touches its heartbeat: PollIntervalSeconds in Core.cs. */
+const PLUGIN_POLL_SECONDS = 0.5;
+
+export interface AwaitCompileOptions {
+	/** Budget for the compile. A full script compile takes 4-6 minutes. */
+	timeoutMs?: number;
+	signal?: AbortSignal;
+}
+
+/** Default budget: a slow full compile is 4-6 min, so 10 leaves room over it. */
+export const LIVE_BRIDGE_AWAIT_COMPILE_TIMEOUT_MS = 600_000;
+
+const mtimeOf = (path: string): number | null => {
+	try {
+		return statSync(path).mtimeMs;
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * Block until the live Editor's script compilation has settled, then report the
+ * compiler's verdict. This exists because a compile outlasts any single bridge
+ * request (4-6 minutes against a 30s transport timeout), and because sleeping
+ * then re-reading status is guesswork: the caller has to invent a duration, and
+ * a duration that is too short returns a report that looks identical to a clean
+ * one.
+ *
+ * It waits by WATCHING FILES, not by polling compile-status. Polling would take
+ * the single bridge lock on every tick and contend with whatever else is
+ * running; a compile also ends in a domain reload, during which the plugin
+ * cannot answer anything at all. The heartbeat and the captured compiler output
+ * are both files, so both survive a reload.
+ *
+ * "Settled" means a capture the plugin COMPLETED was written after this call
+ * began. Deliberately not the heartbeat: the plugin touches it before it tests
+ * isCompiling and then returns, so it ticks through a whole compile, and during
+ * the compile itself the main thread is held and it cannot move at all. It is
+ * only reported afterwards, as `editorResponding`.
+ *
+ * There is deliberately no bridge request for this. A handler cannot wait: Poll
+ * runs on the Editor's main thread, which is the thread the compile needs in
+ * order to finish, so a blocking handler would deadlock the thing it is waiting
+ * for.
+ *
+ * The hard part is the race at entry. This can be called before Unity has even
+ * noticed the edit, and at that moment "no compile is running" is
+ * indistinguishable from "the compile already finished", so a wait keyed to the
+ * compile flag reports a clean build for a broken one. What closes it is the
+ * capture's own completion marker plus its timestamp: a compile Unity ran has
+ * finished writing one, and a compile that has not STARTED cannot have written
+ * anything newer than the moment this call began. A capture that merely records
+ * a cycle starting is not a verdict -- on a 4-6 minute compile that marker is
+ * most of the wait -- so only a completed one settles.
+ */
+export async function requestLiveUnityAwaitCompile(
+	options: AwaitCompileOptions = {},
+): Promise<import("./types.js").UnityAwaitCompileResult> {
+	const timeoutMs = options.timeoutMs ?? LIVE_BRIDGE_AWAIT_COMPILE_TIMEOUT_MS;
+	const { bridgeDir } = getLiveBridgePaths();
+	const heartbeatPath = join(bridgeDir, LIVE_BRIDGE_HEARTBEAT_FILE);
+	const messagesPath = join(bridgeDir, COMPILER_MESSAGES_FILE);
+
+	if (!isLiveBridgeAlive()) {
+		throw new Error(
+			"The Unity Editor is not responding: its bridge heartbeat is stale, so there is nothing to wait for. " +
+				"Run unity_bridge_status to see why, and confirm the project is open, before awaiting a compile.",
+		);
+	}
+
+	if (mtimeOf(heartbeatPath) === null) {
+		throw new Error(`The bridge heartbeat file is missing (${heartbeatPath}), so a compile cannot be awaited.`);
+	}
+	const started = Date.now();
+	const deadline = started + timeoutMs;
+
+	// A capture already on disk describes code as it was BEFORE this call, so it
+	// cannot be the verdict for a compile that is about to run. Its CONTENT is
+	// still worth having -- a project whose every script is broken keeps
+	// reporting needsCompile=true forever, and waiting for a capture from a
+	// compile Unity never starts would burn the whole budget -- so it is
+	// remembered as the fallback answer.
+	//
+	// Its TIMESTAMP is what decides settle, and that is read from the file at
+	// every tick rather than snapshotted here: the compare is against when the
+	// wait STARTED, not against a fresh read, because the first tick runs a
+	// moment later and a baseline taken inside the loop would accept a capture
+	// that was already on disk.
+	const stale = readCapture(messagesPath);
+	// The plugin polls on the main thread and touches the heartbeat once per
+	// tick, so polling faster than this only spins. It also cannot detect a
+	// compile faster than this, so it would gain nothing.
+	const tickMs = Math.ceil(PLUGIN_POLL_SECONDS * 1000);
+
+	// Liveness is NOT checked during the wait, and that is deliberate.
+	// LIVE_BRIDGE_HEARTBEAT_STALE_MS is 10s, because that is how long an IDLE
+	// Editor's silence means it is gone. During a compile it means nothing of
+	// the sort: the domain reload at the end measured 6-8s on its own, and the
+	// compile itself holds the main thread for minutes, so Poll cannot run and
+	// the heartbeat cannot move. Treating that silence as death aborted the
+	// wait 8s into every real compile -- observed live, before this was removed.
+	//
+	// So the answer is reported rather than guessed at: a wait that runs out
+	// says whether the heartbeat moved at all, and a caller that cares about the
+	// difference runs unity_bridge_status.
+	//
+	// Whether the Editor's heartbeat ADVANCED during the wait. The entry mtime is
+	// not a fallback: a plugin that has simply stopped polling looks identical
+	// to one that has gone away, and reusing entry would report the first as
+	// the second.
+	const beatAtEntry = mtimeOf(heartbeatPath);
+	let beatMoved = false;
+
+	for (;;) {
+		await delay(tickMs, options.signal);
+
+		if (Date.now() >= deadline) break;
+
+		// Only a COMPLETED capture settles the wait. The plugin also writes a
+		// marker the moment a cycle starts, which on a 4-6 minute compile is
+		// most of the wait, so settling on any new file would answer while the
+		// compiler was still running.
+		const capture = readCapture(messagesPath);
+		if (capture && capture.completed && capture.finishedAtMs > started) break;
+
+		const beat = mtimeOf(heartbeatPath);
+		if (beat !== null && beatAtEntry !== null && beat > beatAtEntry) beatMoved = true;
+	}
+
+	const waitedMs = Date.now() - started;
+	// Re-read rather than reuse the loop's last value, which is scoped to it.
+	const settledCapture = readCapture(messagesPath);
+
+	// The last thing known about an unsettled wait is a compile that has NOT
+	// finished, which is not a status. "timeout" is returned rather than thrown
+	// so the caller reads the absence of a verdict as a result rather than as
+	// a failure to ask.
+	if (!settledCapture || settledCapture.finishedAtMs <= started || !settledCapture.completed) {
+		return {
+			status: "timeout",
+			errors: stale?.errors ?? [],
+			warnings: stale?.warnings ?? [],
+			source: "none",
+			waitedMs,
+			editorResponding: beatMoved,
+			// A capture that is newer than the wait but not completed is the one
+			// case where more is known than "nothing happened": the plugin
+			// recorded that a cycle began and the budget ran out before it ended.
+			// That is a compile still running, so it is said rather than left to
+			// be read as a hang.
+			compileInFlight: settledCapture !== null && settledCapture.finishedAtMs > started,
+		};
+	}
+
+	const status = await readCompileStatusBestEffort();
+	if (!status) {
+		throw new Error(
+			`The Editor settled after ${Math.round(waitedMs / 1000)}s but would not report its compile status, ` +
+				"so no verdict can be given. Retry once the Editor is responsive.",
+		);
+	}
+
+	// The compiler is only said to have spoken when the capture names the
+	// assembly it built; that is what makes its verdict the final one.
+	if (settledCapture.assembly.length > 0) {
+		return {
+			status: status.errorCount > 0 ? "failed" : "compiled",
+			errors: [...status.errors],
+			warnings: [],
+			source: status.source,
+			waitedMs,
+			editorResponding: beatMoved,
+		};
+	}
+
+	// It did not speak -- a no-op compile, or a build Unity chose not to run --
+	// so needsCompile is the only evidence there is, and it is kept. That is the
+	// case it was written for: a project whose every script is broken logs its
+	// errors once and then stops, so an empty error list would otherwise report
+	// a broken project as clean.
+	const errors = [...status.errors];
+	if (status.needsCompile) {
+		for (const script of status.scriptsNeedingCompile) {
+			errors.push(`${script}  (never compiled)`);
+		}
+	}
+
+	return {
+		status: status.errorCount > 0 || status.needsCompile ? "failed" : "compiled",
+		errors,
+		warnings: [],
+		source: status.source,
+		waitedMs,
+		editorResponding: beatMoved,
+	};
+}
+
+/**
+ * compile-status as evidence for the caller.
+ *
+ * Null rather than a throw: it is consulted while reporting a timeout, where the
+ * useful message is what the Editor last said, and a failure to read it must not
+ * replace that with a second, less useful failure.
+ */
+async function readCompileStatusBestEffort(): Promise<import("./types.js").UnityCompileStatus | null> {
+	try {
+		return await requestLiveUnityBridge<import("./types.js").UnityCompileStatus>({
+			payload: { type: "compile-status" },
+			timeoutMs: LIVE_BRIDGE_COLD_START_TIMEOUT_MS,
+		});
+	} catch {
+		return null;
+	}
+}
 
 export function listStaleResponseFiles(): string[] {
 	const { responsesDir } = getLiveBridgePaths();

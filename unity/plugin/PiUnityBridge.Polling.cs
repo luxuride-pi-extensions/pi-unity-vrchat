@@ -28,6 +28,16 @@ namespace PiUnity
 			{
 				TouchHeartbeat();
 				if (EditorApplication.isCompiling) return;
+				// The first poll after a reload is the earliest moment the Editor
+				// can tell that the cycle is over, and for a build that had a
+				// domain reload it is the ONLY moment: compilationFinished fires
+				// before the reload, so its handler runs in a domain that is about
+				// to be thrown away. Observed live -- a successful build left the
+				// start marker standing, reported as a compile still in flight
+				// for the whole budget. A failed build raises no reload, so its
+				// handler did run and the file was correct; the two paths diverge
+				// exactly on the reload.
+				CloseFinishedCompileCycle();
 				if (EditorApplication.timeSinceStartup < NextPollTime) return;
 				NextPollTime = EditorApplication.timeSinceStartup + PollIntervalSeconds;
 
@@ -78,6 +88,41 @@ namespace PiUnity
 			{
 				// Never let a bridge bug take down the Editor.
 				AppendLog("poll error: " + error);
+			}
+		}
+
+		/// Closes a compile cycle that is over, for the case the event cannot reach.
+		///
+		/// isCompiling has just gone false, so a cycle the start handler recorded
+		/// and no finished handler closed is finished: either it built no
+		/// assembly, or its finished event died with the domain reload the build
+		/// itself caused. Either way the compiler had nothing to say, and saying
+		/// so is what stops a completed compile from reading as one still
+		/// running.
+		private static void CloseFinishedCompileCycle()
+		{
+			if (string.IsNullOrEmpty(CompilerMessagesPath)) return;
+			if (CompilerMessagesCapturedAssembly != "") return;
+			// The statics are empty again after a reload even when the compiler
+			// DID speak before it, so the file on disk is what says whether the
+			// verdict is already recorded. Overwriting it would throw away the
+			// compiler's own answer.
+			try
+			{
+				Json json = Json.Parse(File.ReadAllText(CompilerMessagesPath));
+				if (json.GetBool("completed")) return;
+			}
+			catch (Exception)
+			{
+				// No capture, or one that cannot be read: nothing to preserve.
+			}
+			try
+			{
+				WriteCompileCapture("", new string[0], new string[0], true);
+			}
+			catch (Exception error)
+			{
+				AppendLog("compile cycle close failed: " + error.Message);
 			}
 		}
 
@@ -187,74 +232,128 @@ namespace PiUnity
 			// The log is append-only, so its last error can be one that has since
 			// been fixed -- a stale line read as live is worse than no feedback at
 			// all, because it sends the caller to edit a file that is already
-			// right. Unity only rewrites an output assembly when its compile
-			// succeeds, so a source file older than the assembly that holds it has
-			// been rebuilt clean since the error was written.
+			// right. A source file written before the last compile cycle the
+			// plugin watched ENDED was rebuilt after that error was written, so
+			// the line is the log's memory rather than the compiler's.
+			//
+			// The assembly timestamps are NOT the reference here, for the same
+			// reason they are not the reference in ScriptsNeedingCompile: the
+			// build keys on content hashes, so a compile that changed nothing
+			// leaves every output mtime where it was and a genuinely rebuilt
+			// file can be older than its output's stale clock. Falls back to the
+			// outputs when the plugin has never seen a cycle finish, which is the
+			// weaker question but better than reporting a fixed error as live.
 			string projectRoot = Path.GetDirectoryName(Application.dataPath);
+			DateTime? lastCycle = LastCompletedCompileUtc();
+			DateTime reference;
+			if (lastCycle != null)
+			{
+				reference = lastCycle.Value.ToLocalTime();
+			}
+			else
+			{
+				var outputs = new[]
+				{
+					Path.Combine(projectRoot ?? "", "Library/ScriptAssemblies/Assembly-CSharp.dll"),
+					Path.Combine(projectRoot ?? "", "Library/ScriptAssemblies/Assembly-CSharp-Editor.dll")
+				};
+				var built = outputs.Where(File.Exists).Select(File.GetLastWriteTime).ToList();
+				if (built.Count == 0) return latest;
+				reference = built.Max();
+			}
+
 			var live = new List<string>();
 			foreach (string error in latest)
 			{
-				string relative = error.Split('(')[0];
-				string absolute = Path.Combine(projectRoot ?? "", relative);
-				if (!File.Exists(absolute)) continue;                        // the file is gone, so the error is
-				if (AssemblyFor(relative, projectRoot) is DateTime built     // the compiler's stale memory
-					&& File.GetLastWriteTime(absolute) <= built) continue;
+				string absolute = Path.Combine(projectRoot ?? "", error.Split('(')[0]);
+				if (!File.Exists(absolute)) continue;   // the file is gone, so the error is
+				if (File.GetLastWriteTime(absolute) <= reference) continue;
 				live.Add(error);
 			}
 			return live;
 		}
 
-		/// When the assembly that would contain a source file was last built.
-		///
-		/// Null when there is no output to compare against, which leaves the
-		/// caller treating the error as live -- the safe direction, since a real
-		/// compile error reported when it is gone costs one glance and a missed
-		/// one costs a build that cannot succeed.
-		private static DateTime? AssemblyFor(string projectRelativeSource, string projectRoot)
-		{
-			if (string.IsNullOrEmpty(projectRoot)) return null;
-			// A file under any "Editor" folder compiles into the editor assembly.
-			bool editorSide = projectRelativeSource.Split('/').Any(part => part == "Editor");
-			string dll = Path.Combine(projectRoot, "Library/ScriptAssemblies/Assembly-CSharp"
-				+ (editorSide ? "-Editor" : "") + ".dll");
-			return File.Exists(dll) ? File.GetLastWriteTime(dll) : (DateTime?)null;
-		}
-
-		/// Scripts on disk that no output assembly accounts for.
+		/// Scripts on disk that the last completed compile did not account for.
 		///
 		/// The error log cannot answer "has this project ever compiled": a
 		/// project whose every script is broken logs its errors once and then
 		/// logs nothing again, so the log goes quiet and an empty read looks
-		/// like success. The build output does answer it -- Unity only
-		/// rewrites Assembly-CSharp.dll when a compile succeeds, so a script
-		/// file newer than that dll is a script that never built.
+		/// like success. Something has to, and the build output is the usual
+		/// answer -- a script file newer than the assembly that would hold it
+		/// is a script that never built.
+		///
+		/// It is not a sound answer on Unity 2022.3, though, and that is measured
+		/// rather than suspected. Compilation goes through Bee, which keys its
+		/// work on CONTENT HASHES, so touching a file without changing a byte
+		/// of it rebuilds no assembly and leaves the output's timestamp exactly
+		/// where it was. Observed live: a runtime script touched and then
+		/// compiled with no errors at all, with the runtime assembly's
+		/// timestamp unchanged by the build, which a file-newer-than-output
+		/// rule reports as a script that has never compiled. Forever, because
+		/// nothing a later compile does will move that timestamp either.
+		///
+		/// What is sound is the compile itself, and the plugin already records
+		/// when one ended. A source written after the last completed cycle
+		/// cannot have been part of it; one written before it was, whatever the
+		/// build chose to emit. So the capture is the reference, and the output
+		/// timestamps are only the fallback for a project whose plugin has not
+		/// yet seen a cycle finish.
 		public static List<string> ScriptsNeedingCompile()
 		{
 			var stale = new List<string>();
 			string projectRoot = Path.GetDirectoryName(Application.dataPath);
 			if (string.IsNullOrEmpty(projectRoot)) return stale;
 
-			var assemblies = new[]
+			DateTime? lastCycle = LastCompletedCompileUtc();
+			if (lastCycle == null)
 			{
-				Path.Combine(projectRoot, "Library/ScriptAssemblies/Assembly-CSharp.dll"),
-				Path.Combine(projectRoot, "Library/ScriptAssemblies/Assembly-CSharp-Editor.dll")
-			};
-			var built = assemblies.Where(File.Exists).Select(File.GetLastWriteTime).ToList();
-			if (built.Count == 0)
-			{
-				stale.Add("(the project has never produced an Assembly-CSharp.dll, so nothing in it has compiled)");
-				return stale;
+				var assemblies = new[]
+				{
+					Path.Combine(projectRoot, "Library/ScriptAssemblies/Assembly-CSharp.dll"),
+					Path.Combine(projectRoot, "Library/ScriptAssemblies/Assembly-CSharp-Editor.dll")
+				};
+				var built = assemblies.Where(File.Exists).Select(File.GetLastWriteTime).ToList();
+				if (built.Count == 0)
+				{
+					stale.Add("(the project has never produced an Assembly-CSharp.dll, so nothing in it has compiled)");
+					return stale;
+				}
+				lastCycle = built.Max();
 			}
-			DateTime newest = built.Max();
 
 			string assets = Path.Combine(projectRoot, "Assets");
 			if (!Directory.Exists(assets)) return stale;
+
+			DateTime reference = lastCycle.Value.ToLocalTime();
 			foreach (string file in Directory.GetFiles(assets, "*.cs", SearchOption.AllDirectories))
 			{
-				if (File.GetLastWriteTime(file) <= newest) continue;
-				stale.Add("Assets/" + file.Substring(assets.Length + 1).Replace('\\', '/') + "  (changed " + File.GetLastWriteTime(file).ToString("HH:mm:ss") + ")");
+				DateTime written = File.GetLastWriteTime(file);
+				if (written <= reference) continue;
+				stale.Add("Assets/" + file.Substring(assets.Length + 1).Replace('\\', '/') + "  (changed " + written.ToString("HH:mm:ss") + ")");
 			}
 			return stale;
+		}
+
+		/// When the last compile cycle the plugin watched actually ENDED.
+		///
+		/// Null when there is no completed capture on disk: the plugin has not
+		/// been alive through a cycle, or the file is unparsable. The caller
+		/// falls back to the output assemblies then, which is the weaker
+		/// question but is better than no answer.
+		private static DateTime? LastCompletedCompileUtc()
+		{
+			if (string.IsNullOrEmpty(CompilerMessagesPath) || !File.Exists(CompilerMessagesPath)) return null;
+			try
+			{
+				Json json = Json.Parse(File.ReadAllText(CompilerMessagesPath));
+				if (!json.GetBool("completed")) return null;
+				DateTime at = DateTime.Parse(json.GetString("finishedAt"), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+				return at.ToUniversalTime();
+			}
+			catch (Exception)
+			{
+				return null;
+			}
 		}
 
 		/// Where the Editor writes its log.
@@ -295,6 +394,132 @@ namespace PiUnity
 
 		private static readonly System.Text.RegularExpressions.Regex CompileErrorPattern = new System.Text.RegularExpressions.Regex(
 			@"^(?<file>[^\s].*?)\((?<line>\d+),(?<col>\d+)\):\s*error\s*(?<code>CS\d+):\s*(?<msg>.*)$");
+
+		/// The compiler's own diagnostics for the most recent assembly build.
+		///
+		/// This is the ONLY event that carries them. compilationFinished hands
+		/// over Bee.BeeDriver.ActiveBuild, a compile job with no messages on it,
+		/// and 2022.3 has no CompilationContext to ask afterwards -- which is
+		/// why the fallback below reads the log instead.
+		///
+		/// Written to a FILE rather than kept in a static because a successful
+		/// script compile ends in a domain reload, which discards every static
+		/// here. Anything cached in memory is gone by the time the caller that
+		/// wanted it asks, so the one store that outlives the compile is the
+		/// only one that can answer.
+		///
+		/// Best-effort throughout: a failure to record feedback must never be
+		/// able to fail the compile that produced it.
+		private static void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
+		{
+			try
+			{
+				if (string.IsNullOrEmpty(CompilerMessagesPath)) return;
+
+				var errors = new List<string>();
+				var warnings = new List<string>();
+				foreach (CompilerMessage message in messages ?? new CompilerMessage[0])
+				{
+					string text = FormatCompilerMessage(message);
+					if (message.type == CompilerMessageType.Error) errors.Add(text);
+					else if (message.type == CompilerMessageType.Warning) warnings.Add(text);
+				}
+
+				// Kept for the cycle handler, which runs after this one and has
+				// to decide whether the compiler already spoke. Statics die at
+				// the domain reload that follows, which is fine: the file is the
+				// store that has to survive, and this only has to last until the
+				// end of this cycle.
+				CompilerMessagesCapturedAssembly = assemblyPath ?? "";
+				CompilerMessagesCapturedErrors = errors.ToArray();
+				CompilerMessagesCapturedWarnings = warnings.ToArray();
+				WriteCompileCapture(CompilerMessagesCapturedAssembly, CompilerMessagesCapturedErrors, CompilerMessagesCapturedWarnings, true);
+			}
+			catch (Exception error)
+			{
+				AppendLog("compile message capture failed: " + error.Message);
+			}
+		}
+
+		/// The one place a capture is written, from any of the three handlers.
+		///
+		/// All three write the same path, so the LAST writer wins and ordering is
+		/// the whole design: the start marker lands, then either the compiler's
+		/// verdict or the cycle's own "no assembly to report" overwrites it.
+		/// Write-through is safe under the same rule as the request responses --
+		/// one writer, identical bytes.
+		private static void WriteCompileCapture(string assemblyPath, string[] errors, string[] warnings, bool completed)
+		{
+			Json json = new Json();
+			json.OpenObject();
+			json.AddString("finishedAt", DateTime.Now.ToString("o", CultureInfo.InvariantCulture));
+			json.AddString("assembly", assemblyPath ?? "");
+			json.AddBool("completed", completed);
+			json.AddArray("errors", errors ?? new string[0]);
+			json.AddArray("warnings", warnings ?? new string[0]);
+			json.CloseObject();
+
+			File.WriteAllText(CompilerMessagesPath, json.ToString());
+		}
+
+		/// A compiler message verbatim, so a caller reads one format whichever
+		/// source answered: the log parse and this event emit the same
+		/// "file(line,col): error CSxxxx: text" string.
+		///
+		/// CompilerMessage.message arrives in BOTH shapes. A Roslyn diagnostic
+		/// already reads "Assets/Foo.cs(12,5): error CS1002: ; expected", while
+		/// some other messages arrive as the bare text with the location only on
+		/// the sibling fields. Prepending the location to the first shape would
+		/// double it -- observed live, once the event actually fired. So the
+		/// message is used verbatim whenever it already carries its own
+		/// location, and only bare text is given one.
+		///
+		/// A message with no file is reported as-is rather than dressed up as
+		/// one, because "no file" is a real answer for a project-level error and
+		/// a filename would be a lie.
+		private static string FormatCompilerMessage(CompilerMessage message)
+		{
+			string file = message.file ?? "";
+			string text = message.message ?? "";
+			string kind = message.type == CompilerMessageType.Error ? "error" : "warning";
+
+			if (text.Length == 0)
+				return file.Length == 0 ? "(no file): " + kind : file + "(" + message.line + "," + message.column + "): " + kind;
+
+			// The text is already located -- either at this message's own
+			// coordinates, or with no file at all, which needs no location.
+			if (text.IndexOf("(" + message.line + "," + message.column + ")") >= 0) return text;
+			if (file.Length == 0) return text;
+			return file + "(" + message.line + "," + message.column + "): " + text;
+		}
+
+		/// Whether a compile capture exists on disk at all.
+		private static bool CompilerMessagesCaptured()
+		{
+			return !string.IsNullOrEmpty(CompilerMessagesPath) && File.Exists(CompilerMessagesPath);
+		}
+
+		/// Errors from the captured compile, or null when there is no capture.
+		///
+		/// Null and empty are different answers: null means the event never
+		/// fired, so the log is the only evidence available, and empty means a
+		/// compile really did finish with nothing wrong with it. Collapsing
+		/// them would report "no errors" for a project that never compiled.
+		private static string[] CapturedCompileErrors()
+		{
+			if (string.IsNullOrEmpty(CompilerMessagesPath) || !File.Exists(CompilerMessagesPath)) return null;
+			try
+			{
+				Json json = Json.Parse(File.ReadAllText(CompilerMessagesPath));
+				return json.GetStringArray("errors").ToArray();
+			}
+			catch (Exception)
+			{
+				// A half-written or unparsable file is not evidence of anything;
+				// the log parse is still available.
+				return null;
+			}
+		}
 
 		private static void SaveScenes()
 		{

@@ -170,6 +170,160 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	check("bridge usable after a timeout", recovered === "ok", recovered.slice(0, 120));
 });
 
+console.log("awaiting a compile");
+
+// The whole point of this tool is that it returns when a compile FINISHES, not
+// when a budget runs out, so these use short budgets: a run that had to wait
+// out its timeout is a failure, not a slow pass.
+await withEditor(async ({ bridgeDir, setControl }) => {
+	const bridge = await loadBridge();
+	const capturePath = join(bridgeDir, "compile-messages.json");
+
+	// The heartbeat ticks THROUGH a compile -- Poll touches it before it tests
+	// isCompiling and then returns -- so a settle condition that waited on it
+	// advancing could only ever fire at the deadline. Observed live: a compile
+	// that finished in seconds still burned the entire budget. What the wait
+	// settles on is the CAPTURE, written only when a compile really finished.
+	// A heartbeat that stops mid-wait is a dead Editor, which is not a verdict.
+	setControl({ freezeHeartbeat: true });
+	await sleep(300);
+	const raced = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
+	const raceMessage = JSON.stringify(raced);
+	check(
+		"a frozen heartbeat does NOT report a clean compile",
+		raced.status === "timeout",
+		raceMessage.slice(0, 200),
+	);
+	check(
+		"a timeout is never dressed up as a build result",
+		raced.status !== "compiled",
+		raceMessage.slice(0, 200),
+	);
+	check(
+		"a timeout says which source answered: none did",
+		raced.source === "none",
+		raceMessage.slice(0, 200),
+	);
+	check(
+		"a timeout respects its budget rather than hanging",
+		raced.waitedMs >= 900 && raced.waitedMs < 3_000,
+		`${raced.waitedMs}ms of a 1200ms budget`,
+	);
+	// A frozen heartbeat must NOT abort the wait: 10s of silence is how an IDLE
+	// Editor's death looks, but a domain reload and a compile both hold the main
+	// thread, so it is reported rather than used to give up. Observed live: this
+	// check aborted the wait 8s into every real compile.
+	check(
+		"a frozen heartbeat is REPORTED, not used to abort",
+		raced.editorResponding === false,
+		JSON.stringify(raced),
+	);
+
+	setControl({ freezeHeartbeat: false });
+	await sleep(400);
+
+	// A capture that lands DURING the wait, reporting the compiler's own error
+	// -- the real shape of a compile, which takes time.
+	setControl({
+		compileErrors: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs(132,47): error CS0246: The type or namespace name 'VRCPlayerApi' could not be found"],
+		compileWarnings: ["Assets/Foo.cs(1,1): warning CS0168: unused variable"],
+		captureInMs: 1_500,
+	});
+	const failedStart = Date.now();
+	const failed = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 8_000 });
+	const failedWaited = Date.now() - failedStart;
+	check("a compile with errors reports failed", failed.status === "failed", JSON.stringify(failed));
+	check(
+		"the compiler's own error line is carried through",
+		failed.errors.some((e) => e.includes("error CS0246") && e.includes("VRCPlayerApi")),
+		JSON.stringify(failed),
+	);
+	check("the await reports which path answered", failed.source === "event", JSON.stringify(failed));
+	check("a settled compile leaves the Editor answering", failed.editorResponding === true, JSON.stringify(failed));
+	// The regression this fixes: it used to return only when the budget ran out,
+	// so a compile that finished in seconds still cost the full wait.
+	check(
+		"a settled wait returns promptly instead of burning its budget",
+		failedWaited < 4_000,
+		`${failedWaited}ms of an 8000ms budget`,
+	);
+
+	// A capture that is ALREADY on disk when the wait begins is not a verdict
+	// for this call -- it describes code that is about to change. Settling on it
+	// would report success before the compile even started. Observed live: the
+	// first read happened a tick after entry, so a baseline taken inside the
+	// loop accepted the stale file and returned "compiled" in 501ms.
+	setControl({ compileErrors: [], compileWarnings: [] });
+	await sleep(300);
+	const stale = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
+	check(
+		"a stale capture does NOT settle the next wait",
+		stale.status === "timeout",
+		JSON.stringify(stale),
+	);
+
+	// And the clean case, on the same capture path, with the capture refreshed.
+	setControl({ compileErrors: [], compileWarnings: [], captureInMs: 1_000 });
+	const clean = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 8_000 });
+	check("a clean compile reports compiled", clean.status === "compiled", JSON.stringify(clean));
+	check("a clean compile carries no errors", clean.errors.length === 0, JSON.stringify(clean));
+
+	// No capture at all: the log fallback answers, and its errors must NOT be
+	// dressed up as if the compiler event had said them.
+	rmSync(capturePath, { force: true });
+	setControl({ writeCompileMessages: false });
+	await sleep(300);
+	const fromLog = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
+	check("with no capture the wait times out rather than answering", fromLog.status === "timeout", JSON.stringify(fromLog));
+	check("a timeout answers from no source at all", fromLog.source === "none", JSON.stringify(fromLog));
+
+	// A cycle that STARTED and never finished inside the budget. Unity records
+	// the cycle the moment it begins, and on a 4-6 minute compile that is most
+	// of the wait, so a wait that settled on any new file would answer
+	// "compiled" while the compiler was still running. Settling on the marker is
+	// the regression; naming it is what tells a slow compile from a hang.
+	setControl({ captureInMs: 400, captureNeverFinishes: true });
+	const inFlight = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_500 });
+	check("a cycle that began but has not finished does NOT settle the wait", inFlight.status === "timeout", JSON.stringify(inFlight));
+	check("an unfinished cycle is named as one", inFlight.compileInFlight === true, JSON.stringify(inFlight));
+
+	// A compile Unity built no assembly for. The cycle still ends, but no
+	// assemblyCompilationFinished ever fires, so the compiler never speaks and
+	// without the cycle handler a no-op compile in a clean project always timed
+	// out. Measured live: compilationStarted/Finished fired 1s after the request
+	// while neither assembly event fired at all.
+	setControl({ captureInMs: 600, captureAssembly: "" });
+	const noAssembly = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 6_000 });
+	check("a compile with no assembly to report still settles", noAssembly.status === "compiled", JSON.stringify(noAssembly));
+
+	// The regression the user reported. The compiler ran, built an assembly and
+	// reported nothing wrong, and needsCompile still claimed a script had never
+	// been compiled -- so a green build read as failed.
+	//
+	// needsCompile is a timestamp comparison, not a compiler statement, and on
+	// 2022.3 the comparison cannot work: compilation goes through Bee, which
+	// keys on content hashes, so touching a file without changing a byte
+	// rebuilds no assembly and leaves its output timestamp where it was.
+	// Measured live -- a runtime script touched, compiled with no errors, the
+	// runtime assembly's timestamp unchanged by the build, and the script
+	// reported as never compiled forever, because no later compile moves that
+	// timestamp either. So once the compiler has spoken, its verdict stands
+	// alone and the proxy is not consulted.
+	setControl({ captureInMs: 600, captureAssembly: "Library/ScriptAssemblies/Assembly-CSharp.dll", compileStatusStale: true });
+	const greenBuild = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 6_000 });
+	check("a clean build is not called failed by a stale needsCompile", greenBuild.status === "compiled", JSON.stringify(greenBuild));
+	check("that build reports no errors at all", greenBuild.errors.length === 0, JSON.stringify(greenBuild.errors));
+
+	// The other half, and the reason the proxy exists at all: with no capture
+	// naming an assembly, an empty error list would report a project whose
+	// every script is broken as clean, because a broken project logs its
+	// errors once and then never again. needsCompile is then the only evidence
+	// there is, so it is kept.
+	setControl({ captureInMs: 600, captureNeverFinishes: true, compileStatusStale: true });
+	const neverSpoke = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_500 });
+	check("a wait with no compiler verdict stays a timeout, never clean", neverSpoke.status === "timeout", JSON.stringify(neverSpoke));
+});
+
 console.log("bridge lock");
 
 await withEditor(async () => {

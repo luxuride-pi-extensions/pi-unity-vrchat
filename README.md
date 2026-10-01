@@ -227,6 +227,7 @@ build that skipped your code.
 | `unity_module_revert` | Roll a module back to its checkpoint. |
 | `unity_log_critique` | 0–2 × 5 rubric into `critique.log`, plus a view-adequacy judgement. |
 | `unity_bridge_status` | Is the bridge alive, busy, or locked, and on what. |
+| `unity_await_compile` | **Block until the Editor's script compile settles**, then return the compiler's verdict. Replaces sleeping and re-reading compile status, which is a guess about a 4–6 minute wait. |
 
 **A bone's position is not a GameObject's position.** A VRChat avatar is not
 scene geometry: the descriptor sits in a prefab, the rig lives inside it, and
@@ -350,7 +351,40 @@ its script must clean them up itself.
     re-reading the importer after `ImportAsset`, which is the only way to tell a
     real persistence from a reflected write that looks successful).
   Offline suites cover the request framing, the cross-process lock, timeouts,
-  and the JSON writer (55 assertions in the bridge suite).
+  and the JSON writer (106 assertions in the bridge suite).
+- **`unity_await_compile` is verified live in all three compile shapes**, and
+  the three are different code paths in the plugin:
+  - a compile the Editor builds no assembly for (nothing changed on disk) →
+    `compiled`;
+  - a compile that fails → `failed` with the compiler's own
+    `file(line,col): error CSxxxx:` lines;
+  - a real build that succeeds and reloads the domain → `compiled`.
+  The wait settles on a capture file the plugin writes, because
+  `assemblyCompilationFinished` fires **only for an assembly Unity actually
+  builds** — a no-op compile raises neither assembly event, so a wait keyed to
+  one always times out in a clean project. `compilationStarted` /
+  `compilationFinished` both carry a `Bee.BeeDriver.ActiveBuild` and no
+  messages, and `compilationFinished` is itself lost to the domain reload of a
+  successful build, which is why the plugin's poll closes the cycle instead of
+  trusting the event.
+- **The Editor's heartbeat cannot be used to detect a compile.** `Bridge.Poll`
+  touches it on every tick, so it moves straight through a compile; and during
+  a compile the poll does not run at all, so the heartbeat goes silent for
+  minutes. Both were measured. The wait therefore does not use it — it is only
+  *reported*, as `editorResponding`, so a caller can tell a settled wait from an
+  Editor that has gone away.
+- **`scriptsNeedingCompile` is a TIMESTAMP proxy, and cannot be a compiler
+  statement.** It used to compare each script against its output assembly's
+  mtime, which is unsound on 2022.3: compilation goes through Bee, which keys
+  the build on **content hashes**, so touching a file without changing a byte
+  rebuilds no assembly and leaves the output's mtime where it was — measured
+  live as a script reported as "never compiled" after a build that had just
+  succeeded with no errors, and would stay that way forever. The reference is
+  now when the last compile cycle the plugin watched ENDED; output timestamps
+  remain only as a fallback for a project the plugin has not seen compile. The
+  proxy is also not consulted once the compiler has spoken: a capture naming
+  the assembly it built means the compiler ran and had its say, and a stale
+  `needsCompile` no longer turns a green build into `failed`.
 - **Never exercised live:** `unity_module_run` / `unity_module_revert` with a
   real revert, `unity_capture_view` against a non-trivial Scene view, and the
   mutating `vrc` actions (`ensure-trace-and-optimize`, `vrcfury-add`). They
