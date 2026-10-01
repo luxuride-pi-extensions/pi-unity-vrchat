@@ -67,6 +67,22 @@ const HANDLERS = {
 		],
 	}),
 
+	// The compiler errors from the last finished compile. errorCount is written
+	// separately from the array length in the C# (the Json writer's item count is
+	// 0 for a flat array of strings), so the double states 1 here instead of
+	// deriving it from errors.length -- a derived value would make a test pass
+	// on the very C# bug the field exists to catch.
+	"compile-status": () => ({
+		isCompiling: false,
+		lastError: "",
+		errors: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs(132,47): error CS0246: The type or namespace name 'VRCPlayerApi' could not be found"],
+		errorCount: 1,
+		scriptsNeedingCompile: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs"],
+		needsCompile: true,
+		logPath: "/tmp/fake-unity3d/Editor.log",
+		projectPath: "/tmp/fake-project",
+	}),
+
 	"get-session-context": () => ({
 		projectPath: "/tmp/fake-project",
 		scene: { name: "FakeScene", path: "/tmp/fake-project/Assets/FakeScene.unity" },
@@ -119,12 +135,166 @@ const HANDLERS = {
 			};
 		}
 		if (request.action === "create-light-volume") {
-			return { component: "VRCLightVolumes.PointLightVolume", range: "10 m", intensity: "1", color: "#ffffff" };
+			// range/intensity come back EXACTLY as sent, fractions included, so a
+			// test can catch a side that coerces them to integers.
+			return { component: "VRCLightVolumes.PointLightVolume", range: String(request.range), intensity: String(request.intensity), color: "#ffffff" };
+		}
+		if (request.action === "find-behaviour") {
+			return {
+				behaviour: request.behaviour,
+				found: request.behaviour === "VRC.SDK3.Components.VRCSceneDescriptor",
+				resolvedType: "VRC.SDK3.Components.VRCSceneDescriptor",
+				assembly: "VRCSDK3",
+				gameObject: "VRCWorld",
+				searched: request.gameObject ? `"${request.gameObject}" and its children` : "the whole scene",
+			};
+		}
+		if (
+			request.action === "quest-add" ||
+			request.action === "quest-apply" ||
+			request.action === "setup-layers" ||
+			request.action === "toggle-tag" ||
+			request.action === "create-behaviour" ||
+			request.action === "convert-light" ||
+			request.action === "audio-link-set" ||
+			request.action === "yama-set" ||
+			request.action === "hand-menu-set" ||
+			request.action === "fix-android-shaders" ||
+			request.action === "add-spawn-point" ||
+			request.action === "add-collider" ||
+			request.action === "add-trigger" ||
+			request.action === "add-audio-source" ||
+			request.action === "set-clip-load-type"
+		) {
+			// Mutating actions tag their report with the action, so two in a row
+			// are tellable apart without re-reading prose.
+			return { action: request.action, report: `world action=${request.action} ok` };
 		}
 		return { report: `world action=${request.action} ok` };
 	},
 
-	render: () => ({ imagePath: "/tmp/fake-render.png", width: 960, height: 540 }),
+	// render and capture-view both write the image themselves and report the
+	// path back, so the doubles write it: a caller that checked the path existed
+	// would otherwise fail against a double that only claimed to.
+	render: (request) => {
+		writeFileSync(request.outputPath, "fake png\n");
+		return { imagePath: request.outputPath, width: request.width, height: request.height, cameraName: request.cameraName ?? "" };
+	},
+
+	"capture-view": (request) => {
+		writeFileSync(request.outputPath, "fake png\n");
+		return { imagePath: request.outputPath, width: request.width, height: request.height, source: "scene view" };
+	},
+
+	// inspect and set-property are the pair most likely to be silently wrong:
+	// a dropped key here writes an empty string into whatever field the caller
+	// named, which looks like a successful edit. The doubles echo every key the
+	// wrapper sent, so a payload that loses one fails the assertion below.
+	inspect: (request) => {
+		if (!request.gameObject) throw new Error("inspect needs a gameObject");
+		if (request.gameObject === "Ambiguous") {
+			throw new Error('The name "Ambiguous" is not unique in this scene. Pass a scene path instead.');
+		}
+		return {
+			gameObject: request.gameObject,
+			component: request.component ?? "",
+			includeChildComponents: request.includeChildComponents ?? false,
+			transform: { position: "0,0,0", rotation: "0,0,0", scale: "1,1,1" },
+			components: [{ type: "Transform" }, { type: request.component ?? "MeshRenderer" }],
+			properties: {},
+		};
+	},
+
+	"set-property": (request) => {
+		if (!request.gameObject) throw new Error("set-property needs a gameObject");
+		if (!request.component) throw new Error("set-property needs a component");
+		if (!request.property) throw new Error("set-property needs a property path");
+		// value "" is a legitimate clear for an object reference, so it cannot
+		// be rejected here -- but a MISSING value means the wrapper dropped it.
+		if (request.value === undefined) {
+			throw new Error(`set-property was not told what to write to "${request.property}"`);
+		}
+		return {
+			gameObject: request.gameObject,
+			component: request.component,
+			property: request.property,
+			value: String(request.value),
+			space: request.space ?? "scene",
+			changed: true,
+			dirty: true,
+		};
+	},
+
+	"set-transform": (request) => {
+		if (!request.gameObject) throw new Error("set-transform needs a gameObject");
+		if (request.position === undefined && request.rotationEuler === undefined && request.scale === undefined) {
+			throw new Error("set-transform was given nothing to change");
+		}
+		return {
+			gameObject: request.gameObject,
+			position: request.position ?? "0,0,0",
+			rotationEuler: request.rotationEuler ?? "0,0,0",
+			scale: request.scale ?? "1,1,1",
+			space: request.space ?? "world",
+			changed: true,
+		};
+	},
+
+	"get-bones": (request) => ({
+		root: request.gameObject ?? "Avatar",
+		// Filtering by the caller's `bones` is the whole point of the filter, so
+		// the double honours it: a wrapper that dropped the array would return
+		// 180 bones and pass a test that only checked "some bones".
+		humanoidBones: Object.fromEntries(
+			(request.bones?.length ? request.bones : ["Hips", "Head", "LeftHand"]).map((name) => [
+				name,
+				{ position: "0,0,0", localPosition: "0,0,0" },
+			]),
+		),
+		rig: Object.fromEntries(
+			(request.bones?.length ? request.bones : ["Hips", "Head", "LeftHand"]).map((name) => [
+				name,
+				{ position: "0,0,0", localPosition: "0,0,0" },
+			]),
+		),
+		truncated: false,
+	}),
+
+	"geometry-probe": (request) => ({
+		transform: { mirrorScale: false, unappliedScale: false },
+		bounds: { state: "exact", size: "1,1,1", center: "0,0,0" },
+		objects: (request.objects ?? []).map((name) => ({ name, state: "exact" })),
+	}),
+
+	"prefab-info": (request) => ({
+		prefabPath: request.prefabPath,
+		hierarchy: [{ name: "Root", scenePath: "Root", vertexCount: 8 }],
+		materials: [],
+		bounds: { state: "at-rest", size: "1,1,1" },
+	}),
+
+	"instantiate-prefab": (request) => ({
+		instancePath: "Chair (2)/Seat",
+		prefabPath: request.prefabPath,
+		position: request.position ?? "0,0,0",
+		rotation: request.rotation ?? "0,0,0",
+		scale: request.scale ?? "1,1,1",
+		children: ["Seat", "Back"],
+	}),
+
+	"find-source-models": (request) => ({
+		models: (request.gameObjectNames ?? []).map((name) => ({ gameObject: name, assetPath: `Assets/Models/${name}.fbx` })),
+		unhandoffableNames: [],
+		unhandoffableCounts: {},
+	}),
+
+	"export-source-models": (request) => ({
+		exported: (request.gameObjectNames ?? []).map((name) => ({
+			gameObject: name,
+			sourcePath: `Assets/Models/${name}.fbx`,
+			copiedTo: join(request.outputDir, `${name}.fbx`),
+		})),
+	}),
 
 	"get-scene-info": () => ({
 		objects: [{ name: "Cube", childCount: 0 }],

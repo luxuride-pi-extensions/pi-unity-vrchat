@@ -241,6 +241,28 @@ export const requestLiveUnityWorld = (options: {
 	range?: number;
 	intensity?: number;
 	color?: string;
+	tag?: string;
+	inactive?: boolean;
+	object?: string;
+	component?: string;
+	path?: string;
+	target?: string;
+	property?: string;
+	value?: string;
+	fields?: string;
+	keepOriginal?: string;
+	material?: string;
+	shader?: string;
+	position?: string;
+	rotation?: string;
+	shape?: string;
+	size?: string;
+	isTrigger?: string;
+	clip?: string;
+	volume?: string;
+	spatial?: string;
+	loop?: string;
+	loadType?: string;
 	timeoutMs?: number;
 }) =>
 	requestLiveUnityBridge<import("./types.js").UnityVrcResult>({
@@ -254,6 +276,31 @@ export const requestLiveUnityWorld = (options: {
 			range: options.range,
 			intensity: options.intensity,
 			color: options.color,
+			tag: options.tag,
+			inactive: options.inactive,
+			object: options.object,
+			component: options.component,
+			path: options.path,
+			target: options.target,
+			// Names the world-package set actions: the field to write, the
+			// value to write, and the comma-separated Field=Value list that
+			// create-behaviour applies in one call.
+			property: options.property,
+			value: options.value,
+			fields: options.fields,
+			keepOriginal: options.keepOriginal,
+			material: options.material,
+			shader: options.shader,
+			position: options.position,
+			rotation: options.rotation,
+			shape: options.shape,
+			size: options.size,
+			isTrigger: options.isTrigger,
+			clip: options.clip,
+			volume: options.volume,
+			spatial: options.spatial,
+			loop: options.loop,
+			loadType: options.loadType,
 		},
 	});
 

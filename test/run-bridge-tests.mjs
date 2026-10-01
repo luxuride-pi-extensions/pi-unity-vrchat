@@ -66,7 +66,9 @@ async function withEditor(fn) {
 	process.env.PI_UNITY_BRIDGE_DIR = bridgeDir;
 
 	try {
-		return await fn({ bridgeDir, setControl: (o) => writeFileSync(join(bridgeDir, "control.json"), JSON.stringify(o)) });
+		// dir is handed to the callback so a test can write a file the fake Editor
+		// claims to have produced, rather than asserting against a path nothing wrote.
+		return await fn({ dir, bridgeDir, setControl: (o) => writeFileSync(join(bridgeDir, "control.json"), JSON.stringify(o)) });
 	} finally {
 		if (previous === undefined) delete process.env.PI_UNITY_BRIDGE_DIR;
 		else process.env.PI_UNITY_BRIDGE_DIR = previous;
@@ -253,6 +255,325 @@ await withEditor(async () => {
 		created?.component === "VRCLightVolumes.PointLightVolume",
 		JSON.stringify(created),
 	);
+
+	// A fractional range is the case that silently broke: the C# side read it
+	// with an int parser, which rejects "12.5" and returns the fallback, so the
+	// volume came back at the default while the caller was told it had been set.
+	const fractional = await bridge.requestLiveUnityWorld({
+		action: "create-light-volume",
+		lightType: "SpotLight",
+		range: 12.5,
+		intensity: 3.5,
+		color: "ff8844",
+	});
+	check("world create-light-volume keeps a fractional range", fractional?.range === "12.5", JSON.stringify(fractional));
+	check("world create-light-volume keeps a fractional intensity", fractional?.intensity === "3.5", JSON.stringify(fractional));
+
+	// find-behaviour with no gameObject searches the whole scene and says so,
+	// rather than reporting a miss under a GameObject that was never named.
+	const sceneWide = await bridge.requestLiveUnityWorld({
+		action: "find-behaviour",
+		behaviour: "VRC.SDK3.Components.VRCSceneDescriptor",
+	});
+	check("world find-behaviour finds scene-wide by full name", sceneWide?.found === true, JSON.stringify(sceneWide));
+	check(
+		"world find-behaviour reports the type it resolved to",
+		sceneWide?.resolvedType === "VRC.SDK3.Components.VRCSceneDescriptor",
+		JSON.stringify(sceneWide),
+	);
+	check("world find-behaviour says it searched the whole scene", sceneWide?.searched === "the whole scene", JSON.stringify(sceneWide));
+
+	const scoped = await bridge.requestLiveUnityWorld({
+		action: "find-behaviour",
+		behaviour: "VRC.SDK3.Components.VRCObjectSync",
+		gameObject: "VRCWorld",
+	});
+	check("world find-behaviour reports the scope it searched", scoped?.searched === '"VRCWorld" and its children', JSON.stringify(scoped));
+
+	// The toolkit and quest-switch parameters reach the bridge as named keys
+	// rather than a positional blob, so a dropped field here is what makes a
+	// mutating world action quietly act on the wrong thing.
+	const questAdd = await bridge.requestLiveUnityWorld({ action: "quest-add", object: "Directional Light" });
+	check("world quest-add carries the object name and tags its report", questAdd?.action === "quest-add", JSON.stringify(questAdd));
+
+	const questApply = await bridge.requestLiveUnityWorld({ action: "quest-apply", target: "android" });
+	check("world quest-apply carries the target platform", questApply?.action === "quest-apply", JSON.stringify(questApply));
+
+	const toggle = await bridge.requestLiveUnityWorld({ action: "toggle-tag", tag: "Interactable", inactive: true });
+	check("world toggle-tag carries the tag and the inactive flag", toggle?.action === "toggle-tag", JSON.stringify(toggle));
+
+	// The new world actions each carry parameters that existed for exactly one
+	// action, so a key dropped in the bridge payload is silent: the C# side
+	// reads an absent field and falls back to a default that looks plausible.
+	const createBehaviour = await bridge.requestLiveUnityWorld({
+		action: "create-behaviour",
+		behaviour: "VRC.SDK3.Components.VRCObjectSync",
+		gameObject: "Pi_Sync",
+		fields: "allowCollisionOwnershipTransfer=false",
+	});
+	check("world create-behaviour carries the behaviour and field list", createBehaviour?.action === "create-behaviour", JSON.stringify(createBehaviour));
+
+	const convert = await bridge.requestLiveUnityWorld({
+		action: "convert-light",
+		gameObject: "Directional Light",
+		lightType: "PointLight",
+		range: 8.5,
+		keepOriginal: "false",
+	});
+	check("world convert-light carries the range and the keep-original choice", convert?.action === "convert-light", JSON.stringify(convert));
+
+	// The <package>-set actions are the one place a FIELD NAME and its value
+	// travel as strings, so both keys are asserted: losing value while keeping
+	// property writes an empty string into the field the user asked about.
+	const audioSet = await bridge.requestLiveUnityWorld({
+		action: "audio-link-set",
+		gameObject: "Pi_AudioLink",
+		property: "gain",
+		value: "0.35",
+	});
+	check("world audio-link-set carries the field and its value", audioSet?.action === "audio-link-set", JSON.stringify(audioSet));
+
+	// The authoring actions each added their own parameter keys, and a key the
+	// payload drops is silent: the C# side reads an absent field and falls back
+	// to a default that looks plausible in the report.
+	const shaderFix = await bridge.requestLiveUnityWorld({
+		action: "fix-android-shaders",
+		material: "GridFloor_udon",
+		shader: "VRChat/Mobile/Standard Lite",
+	});
+	check("world fix-android-shaders carries the material and target shader", shaderFix?.action === "fix-android-shaders", JSON.stringify(shaderFix));
+
+	const spawn = await bridge.requestLiveUnityWorld({
+		action: "add-spawn-point",
+		position: "1,2,3",
+		rotation: "0,90,0",
+	});
+	check("world add-spawn-point carries its position and rotation", spawn?.action === "add-spawn-point", JSON.stringify(spawn));
+
+	const collider = await bridge.requestLiveUnityWorld({
+		action: "add-collider",
+		gameObject: "Floor",
+		shape: "Box",
+		size: "4",
+		isTrigger: "false",
+	});
+	check("world add-collider carries the shape, size and trigger flag", collider?.action === "add-collider", JSON.stringify(collider));
+
+	const audioSource = await bridge.requestLiveUnityWorld({
+		action: "add-audio-source",
+		clip: "SampleAudio",
+		volume: "0.8",
+		spatial: "0",
+		loop: "true",
+	});
+	check("world add-audio-source carries the clip and its audio settings", audioSource?.action === "add-audio-source", JSON.stringify(audioSource));
+
+	const loadType = await bridge.requestLiveUnityWorld({ action: "set-clip-load-type", clip: "SampleAudio", loadType: "Streaming" });
+	check("world set-clip-load-type carries the clip and the load type", loadType?.action === "set-clip-load-type", JSON.stringify(loadType));
+});
+
+console.log("compile status: the compiler's own errors");
+
+// compile-status is the one request whose absence made build-checks pass a
+// project whose scripts had never compiled, so its shape is asserted field by
+// field rather than by "it returned something".
+await withEditor(async () => {
+	const live = await loadBridge();
+	const status = await live.requestLiveUnityBridge({ payload: { type: "compile-status" }, timeoutMs: 5_000 });
+	check("compile-status reports the compiler errors, not just isCompiling", Array.isArray(status?.errors) && status.errors.length > 0, JSON.stringify(status));
+	check(
+		"a compile error keeps the compiler's own wording and position",
+		/\(\d+,\d+\): error CS\d+:/.test(status?.errors?.[0] ?? ""),
+		status?.errors?.[0],
+	);
+	// errorCount is a SEPARATE number in the C# because the Json writer's item
+	// count is 0 for a flat array of strings -- deriving it from the array here
+	// would make this check pass on the very bug the field exists to catch.
+	check("compile-status errorCount agrees with the errors array", status?.errorCount === status?.errors?.length, JSON.stringify(status));
+	check("compile-status lists the scripts that are not compiled yet", Array.isArray(status?.scriptsNeedingCompile) && status.scriptsNeedingCompile.length > 0, JSON.stringify(status));
+	check("compile-status sets needsCompile from those scripts", status?.needsCompile === true, JSON.stringify(status));
+	check("compile-status names the log it read, so a reader can go and look", typeof status?.logPath === "string" && status.logPath.length > 0, JSON.stringify(status));
+	check("compile-status names the project it compiled", status?.projectPath === "/tmp/fake-project", JSON.stringify(status));
+});
+
+console.log("the non-world request types: every payload key survives the round trip");
+
+// These wrappers had no handler and no test at all, which meant a key dropped
+// while the payload grew was invisible: the C# side reads an absent field and
+// falls back to a default that reads back as plausible. Each check below names
+// the field whose loss would be silent.
+await withEditor(async ({ dir }) => {
+	const bridge = await loadBridge();
+
+	// The three that MUTATE. A dropped key here is not a missing report, it is a
+	// write to the wrong thing or an edit that says it happened when it did not.
+	const inspect = await bridge.requestLiveUnityInspect({
+		gameObject: "Floor",
+		component: "MeshRenderer",
+		includeChildComponents: true,
+	});
+	check(
+		"inspect carries the object, the component and the child flag",
+		inspect?.gameObject === "Floor" && inspect?.component === "MeshRenderer" && inspect?.includeChildComponents === true,
+		JSON.stringify(inspect),
+	);
+
+	// The real bridge REFUSES an ambiguous bare name and names the candidates.
+	// A double that answered anyway would let a wrapper that lost the gameObject
+	// pass this suite, so the refusal is exercised instead.
+	let ambiguous;
+	try {
+		ambiguous = await bridge.requestLiveUnityInspect({ gameObject: "Ambiguous" });
+	} catch (error) {
+		ambiguous = { error: String(error?.message ?? error) };
+	}
+	check(
+		"inspect surfaces the refusal to guess at an ambiguous name",
+		String(ambiguous?.error ?? "").includes("not unique"),
+		JSON.stringify(ambiguous),
+	);
+
+	const setProperty = await bridge.requestLiveUnitySetProperty({
+		gameObject: "Floor",
+		component: "MeshRenderer",
+		property: "m_Materials",
+		value: "GridFloor_udon",
+		space: "scene",
+	});
+	check(
+		"set-property carries the property path and its value",
+		setProperty?.property === "m_Materials" && setProperty?.value === "GridFloor_udon",
+		JSON.stringify(setProperty),
+	);
+	check("set-property reports the space it wrote into", setProperty?.space === "scene", JSON.stringify(setProperty));
+	check("set-property marks the scene dirty rather than claiming a save", setProperty?.dirty === true && setProperty?.changed === true, JSON.stringify(setProperty));
+
+	const setTransform = await bridge.requestLiveUnitySetTransform({
+		gameObject: "Pi_SpawnPoint",
+		position: "1,2,3",
+		rotationEuler: "0,90,0",
+		scale: "2,2,2",
+		space: "world",
+	});
+	check(
+		"set-transform carries position, rotation and scale",
+		setTransform?.position === "1,2,3" && setTransform?.rotationEuler === "0,90,0" && setTransform?.scale === "2,2,2",
+		JSON.stringify(setTransform),
+	);
+	check("set-transform carries the space, so local and world stay distinct", setTransform?.space === "world", JSON.stringify(setTransform));
+
+	// get-bones with a filter: an avatar has 180+ bones, so a payload that lost
+	// the array returns everything and a test asserting "has bones" still passes.
+	const bones = await bridge.requestLiveUnityBones({
+		gameObject: "Avatar",
+		bones: ["LeftHand", "Head"],
+		limit: 200,
+	});
+	check(
+		"get-bones carries the name filter through to the bridge",
+		Object.keys(bones?.humanoidBones ?? {}).length === 2 && "LeftHand" in (bones?.humanoidBones ?? {}),
+		JSON.stringify(bones),
+	);
+
+	// geometry-probe and prefab-info answer questions a render cannot, so the
+	// shape is what matters: an empty list where objects were named would read
+	// as "these objects have no mesh" rather than as a dropped key.
+	const probe = await bridge.requestLiveUnityGeometryProbe({ objects: ["Floor", "Main Camera"] });
+	check(
+		"geometry-probe returns one entry per object it was asked about",
+		Array.isArray(probe?.objects) && probe.objects.length === 2,
+		JSON.stringify(probe),
+	);
+
+	const prefab = await bridge.requestLiveUnityPrefabInfo({ prefabPath: "Assets/PiImported/Chair.prefab" });
+	check("prefab-info answers for the asset path given", prefab?.prefabPath === "Assets/PiImported/Chair.prefab", JSON.stringify(prefab));
+	check(
+		"prefab-info reports the bounds STATE, not just a size",
+		typeof prefab?.bounds?.state === "string",
+		JSON.stringify(prefab),
+	);
+
+	// instantiate-prefab places and names in ONE call, so the returned path is
+	// the only stable handle for everything after it.
+	const placed = await bridge.requestLiveUnityInstantiatePrefab({
+		prefabPath: "Assets/PiImported/Chair.prefab",
+		position: "2,0,3",
+		rotation: "0,90,0",
+		scale: "1,1,1",
+	});
+	check(
+		"instantiate-prefab places it and returns the instance path to address it by",
+		placed?.instancePath === "Chair (2)/Seat" && placed?.position === "2,0,3",
+		JSON.stringify(placed),
+	);
+
+	const find = await bridge.requestLiveUnityFindSourceModels({ gameObjectNames: ["Floor", "Chair"] });
+	check(
+		"find-source-models resolves every named object",
+		(find?.models ?? []).length === 2 && find.models[0].assetPath === "Assets/Models/Floor.fbx",
+		JSON.stringify(find),
+	);
+
+	const exported = await bridge.requestLiveUnityExportSourceModels({
+		gameObjectNames: ["Floor"],
+		outputDir: "/tmp/fake-export",
+	});
+	check(
+		"export-source-models carries the destination it copied into",
+		String(exported?.exported?.[0]?.copiedTo ?? "").startsWith("/tmp/fake-export/"),
+		JSON.stringify(exported),
+	);
+
+	// capture-view and set-tool are the two that write into the Editor's own UI
+	// state, which is invisible to every other check here.
+	const capturePath = join(dir, "capture.png");
+	const capture = await bridge.requestLiveUnityCaptureView({ outputPath: capturePath, width: 800, height: 600 });
+	check("capture-view carries the requested size", capture?.width === 800 && capture?.height === 600, JSON.stringify(capture));
+	check(
+		"capture-view reports the path it WROTE, and the file is there",
+		capture?.imagePath === capturePath && existsSync(capturePath),
+		JSON.stringify(capture),
+	);
+
+	const renderPath = join(dir, "render.png");
+	const render = await bridge.requestLiveUnityRender({ outputPath: renderPath, width: 640, height: 480, cameraName: "Main Camera" });
+	check(
+		"render reports the path it wrote, the size it used and the camera it chose",
+		render?.imagePath === renderPath && render.width === 640 && render.cameraName === "Main Camera" && existsSync(renderPath),
+		JSON.stringify(render),
+	);
+
+	const tool = await bridge.requestLiveUnitySetTool("Rotate");
+	check("set-tool carries the tool name", tool?.tool === "Rotate" && tool?.activeTransformTool === "Rotate", JSON.stringify(tool));
+
+	// Negative cases, so the checks above are not theatre: each double REFUSES
+	// the payload a dropped key would produce. Without these, a handler that
+	// answered everything would pass the positive checks just as happily.
+	const noValue = await bridge
+		.requestLiveUnityBridge({ payload: { type: "set-property", gameObject: "Floor", component: "MeshRenderer", property: "m_Materials" }, timeoutMs: 5_000 })
+		.then((r) => ({ error: `resolved instead of refusing: ${JSON.stringify(r)}` }))
+		.catch((e) => ({ error: String(e?.message ?? e) }));
+	check("set-property refuses a payload with no value at all", noValue.error.includes("what to write"), JSON.stringify(noValue));
+
+	const nothingToDo = await bridge
+		.requestLiveUnityBridge({ payload: { type: "set-transform", gameObject: "Floor" }, timeoutMs: 5_000 })
+		.then((r) => ({ error: `resolved instead of refusing: ${JSON.stringify(r)}` }))
+		.catch((e) => ({ error: String(e?.message ?? e) }));
+	check("set-transform refuses a payload that changes nothing", nothingToDo.error.includes("nothing to change"), JSON.stringify(nothingToDo));
+
+	const noObject = await bridge
+		.requestLiveUnityBridge({ payload: { type: "inspect" }, timeoutMs: 5_000 })
+		.then((r) => ({ error: `resolved instead of refusing: ${JSON.stringify(r)}` }))
+		.catch((e) => ({ error: String(e?.message ?? e) }));
+	check("inspect refuses a payload with no object named", noObject.error.includes("gameObject"), JSON.stringify(noObject));
+
+	// scene-info and session-context are read-only, so their coverage is only
+	// about not being empty.
+	const info = await bridge.requestLiveUnitySceneInfo(["objects", "cameras"]);
+	check("scene-info returns the categories it was asked for", Array.isArray(info?.objects) && Array.isArray(info?.cameras), JSON.stringify(info));
+
+	const context = await bridge.requestLiveUnitySessionContext();
+	check("session-context reports the open scene", context?.scene?.name === "FakeScene", JSON.stringify(context));
 });
 
 console.log("bridge status: logs and a corrupt lock");

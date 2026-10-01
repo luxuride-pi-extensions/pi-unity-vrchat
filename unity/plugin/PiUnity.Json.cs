@@ -176,6 +176,18 @@ namespace PiUnity
 			return int.TryParse(value.asString, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed) ? parsed : fallback;
 		}
 
+		/// Float, because NumberStyles.Integer REFUSES a decimal point: GetInt
+		/// silently returns the fallback for "12.5" rather than failing, so a
+		/// fractional request through a caller that asked for an int lands as a
+		/// default and the caller never learns why.
+		public float GetFloat(string key, float fallback = 0)
+		{
+			Json value = Get(key);
+			if (value == null) return fallback;
+			float parsed;
+			return float.TryParse(value.asString, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ? parsed : fallback;
+		}
+
 		public List<string> GetStringArray(string key)
 		{
 			Json value = Get(key);

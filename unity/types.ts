@@ -233,6 +233,26 @@ export interface UnityVrcResult {
 	range?: string;
 	intensity?: string;
 	color?: string;
+	newGameObject?: boolean;
+	/**
+	 * The mutating world actions (setup-layers, setup-post-processing, toggle-tag, quest-add, quest-apply,
+	 * create-behaviour, convert-light, and the <package>-set actions). It is how a caller that ran two in a row
+	 * tells the two answers apart, since the payload is otherwise the same `report` string.
+	 */
+	action?: string;
+	/** `world action=find-behaviour`: which scope was searched on a miss. */
+	searched?: string;
+	/** The descriptor's spawn configuration, `world action=descriptor`. */
+	spawnRadius?: string;
+	spawnOrder?: string;
+	spawnOrientation?: string;
+	RespawnHeightY?: string;
+	ObjectBehaviourAtRespawnHeight?: string;
+	ForbidUserPortals?: string;
+	ReferenceCamera?: string;
+	DefaultSpawnScale?: string;
+	UseCustomSpawnScale?: string;
+	unityVersion?: string;
 }
 
 export interface UnityMaterialInfo {
@@ -297,6 +317,19 @@ export interface UnityAssetInfo extends UnityAssetEntry {}
 export interface UnityCompileStatus {
 	isCompiling: boolean;
 	lastError: string;
+	/**
+	 * Every `error CS…` line from the last finished compile, filtered to those
+	 * that still describe the source on disk. Empty means a clean compile;
+	 * `scriptsNeedingCompile` being non-empty is the OTHER failure mode, and the
+	 * one an empty `errors` array on its own would hide.
+	 */
+	errors: string[];
+	errorCount: number;
+	/** Scripts newer than the last successful build, so their code is not compiled yet. */
+	scriptsNeedingCompile: string[];
+	needsCompile: boolean;
+	/** Where the compiler's messages were read from, so a reader can go and look. */
+	logPath: string;
 	projectPath: string;
 }
 

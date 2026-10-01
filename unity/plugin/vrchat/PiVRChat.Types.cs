@@ -140,9 +140,15 @@ namespace PiUnity
 			Type type = Type(typeName);
 			var found = new List<Component>();
 			if (type == null || root == null) return found;
-			foreach (Component component in root.GetComponentsInChildren<Transform>(true))
+			foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
 			{
-				if (type.IsInstanceOfType(component)) found.Add(component);
+				// GetComponents, not GetComponent: a GameObject can carry several
+				// of the same type (a descriptor carries one UdonBehaviour per
+				// spawn point) and GetComponent would report only the first.
+				foreach (Component component in child.GetComponents(type))
+				{
+					found.Add(component);
+				}
 			}
 			return found;
 		}

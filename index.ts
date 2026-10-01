@@ -263,7 +263,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 				}),
 			),
 		}),
-		execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			// Injection is a statement of INTENT, not of success: it is set
 			// before any work, so a tool that throws (bad argument, no editor)
 			// still leaves the guidance flowing for the next turn. It does NOT
@@ -363,7 +363,9 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 		label: "Unity Scene Info",
 		description:
 			"Inspect the live Unity scene and project. Narrow it with `categories` instead of dumping everything: " +
-			`${UNITY_SCENE_INFO_CATEGORIES.join(", ")}. The default omits packages and assets, which are slow and large.`,
+			`${UNITY_SCENE_INFO_CATEGORIES.join(", ")}. The default omits packages and assets, which are slow and large. ` +
+			"`compileStatus` is the one worth reading before you believe a build: `errors` carries the compiler's own `error CS…` lines, " +
+			"and `scriptsNeedingCompile` lists scripts newer than the last successful build -- both empty means the code on disk is compiled.",
 		parameters: Type.Object({
 			workspace: Type.Optional(
 				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
@@ -817,10 +819,20 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 		name: "unity_world",
 		label: "Unity VRChat (world)",
 		description:
-			"VRChat WORLD project helpers: light volumes, Udon, and the scene descriptor. Start with action \"scene\", which reports " +
-			"packages, the VRC_SceneDescriptor, Udon counts, world behaviours, and the light volume setup in one call. " +
-			"Actions: scene, descriptor, light-volumes, create-light-volume, udon, find-behaviour, actions. " +
+			"VRChat WORLD project helpers: light volumes, Udon, the scene descriptor, upload validation, VRWorld Toolkit, " +
+			"EasyQuestSwitch, AudioLink, YamaPlayer and VRCHandMenu. " +
+			"Start with action \"scene\", which reports " +
+			"packages, the scene descriptor (by its real resolved type), Udon counts, world behaviours, and the light volume setup in one call. " +
+			"Actions: scene, descriptor, light-volumes, create-light-volume, convert-light, udon, udon-inventory, find-behaviour, create-behaviour, " +
+			"toolkit-state, setup-layers, setup-post-processing, toggle-tag, " +
+			"quest-switch, quest-add, quest-apply, " +
+			"build-checks, upload-risk, performance, environment, " +
+			"audio-link, audio-link-set, yama, yama-set, hand-menu, hand-menu-set, " +
+			"materials, fix-android-shaders, spawn-points, add-spawn-point, " +
+			"colliders, add-collider, add-trigger, audio, add-audio-source, set-clip-load-type, actions. " +
 			"Light volumes bake at BUILD time, so a new one changes nothing on screen until you build. " +
+			"build-checks runs VRChat's own validators WITHOUT uploading, and never triggers the modal dialogs the SDK's build callbacks open. " +
+			"quest-apply switches a world's PC/Quest values WITHOUT changing the project's active build target, and leaves the scene unsaved. " +
 			"Not for avatar projects; use unity_vrc there.",
 		parameters: Type.Object({
 			workspace: Type.Optional(
@@ -830,17 +842,182 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 				description:
 					"scene = the full picture (packages, descriptor, Udon, behaviours, light volumes). descriptor = the VRC_SceneDescriptor. " +
 					"light-volumes = every point light volume with its range, intensity, colour and shape, plus the bake settings. " +
-					"create-light-volume = add one. udon = UdonBehaviour counts and why script creation is not automated. " +
-					"find-behaviour = resolve a world behaviour by name and report the real type. actions = the list.",
+					"create-light-volume = add one. udon = UdonBehaviour counts, and why writing new UdonSharp SOURCE is a human job. " +
+					"find-behaviour = resolve a world behaviour by name and report the real type. " +
+					"toolkit-state = VRWorld Toolkit's own project facts: VRChat layers and collision matrix, " +
+					"post-processing wiring on the reference camera, and every scene material on a shader that is not Android-safe. " +
+					"setup-layers = set up the VRChat layers and collision matrix (the SDK's own Builder setup). " +
+					"setup-post-processing = add the post process layer, profile and volume to the reference camera. " +
+					"toggle-tag = enable or disable every object carrying a tag. " +
+					"quest-switch = EasyQuestSwitch state: the switch set, and per entry which PC/Quest values differ. " +
+					"quest-add = add a scene object or asset to the switch set, creating the EQS_DATA holder if the scene has none. " +
+					"Add a component (component: \"Light\") when you want that component's per-platform values, not just the GameObject's. " +
+					"quest-apply = apply pc or android values without switching the project's build target. " +
+					"build-checks = run VRChat's own upload validation without uploading: descriptor and spawn points, illegal " +
+					"components and shaders against the SDK whitelists, EditorOnly-tagged objects, Udon compile errors. " +
+					"upload-risk = what makes an upload REJECTED or force a rebuild: asset sizes against VRChat's limits, audio " +
+					"clip load types and lengths, texture sizes and Android compression, unconfigured world behaviours. " +
+					"udon-inventory = every UdonBehaviour with its proxy script, sync method, program size and public variables. " +
+					"performance = a scene census that PREDICTS the build rating (objects, renderers, meshes, materials, " +
+					"lights, particles, textures, audio, lightmaps) and names the biggest levers. Every figure is a proxy; " +
+					"VRChat computes the rank at build time. " +
+					"environment = how the world looks: skybox, ambient, fog, directional light, the reference camera and " +
+					"its post-processing layer, and what this scene does NOT configure. " +
+					"convert-light = turn a Unity Light into a light volume, reading the light's own type, range, intensity and colour. " +
+					"create-behaviour = add a VRChat world behaviour to an object, optionally setting fields in the same call. " +
+					"audio-link = every AudioLink component with its fields; audio-link-set = set one field on one. " +
+					"yama = every YamaPlayer component; yama-set = set one field on one. " +
+					"hand-menu = every VRCHandMenu component; hand-menu-set = set one field on one. " +
+					"materials = every material the scene's renderers use, with its shader, the Quest verdict against the " +
+					"whitelist, every texture slot (including slots with nothing assigned), and its colour. " +
+					"fix-android-shaders = swap one material to a Quest-safe shader, carrying the main colour, main texture, " +
+					"tiling/offset and metallic/glossiness across, and reporting every property that could NOT be carried. " +
+					"spawn-points = every spawn with its world position, plus the descriptor's spawn settings. " +
+					"add-spawn-point = append one to the descriptor's spawns array. " +
+					"colliders = every collider with its shape numbers, plus meshes with no collider or a null one. " +
+					"add-collider = add or configure one. add-trigger = that, plus the reason the current SDK has no trigger behaviour to add (VRC_Trigger is abstract, so a script reacts to the collider instead). " +
+					"audio = every AudioSource (2D or 3D, audibility, clip length, load type) and the clips the scene uses. " +
+					"add-audio-source = add one with a clip. set-clip-load-type = set a clip's importer load type. " +
+					"actions = the list.",
 			}),
+			property: Type.Optional(
+				Type.String({
+					description:
+						"The <package>-set actions and create-behaviour's field list: the FIELD NAME to write. On these " +
+						"packages the user-facing fields are private, so an unknown name comes back with the list of fields " +
+						"that DO exist rather than a silent no-op.",
+				}),
+			),
+			value: Type.Optional(
+				Type.String({
+					description:
+						"The <package>-set actions: the value, coerced by the field's own type -- bool, number, " +
+						"\"#rrggbb\" colour, enum member name, or another scene object's name. Read the current value with the " +
+						"matching describe action first; a UdonSharp field is copied back into the Udon program after the write.",
+				}),
+			),
+			fields: Type.Optional(
+				Type.String({
+					description:
+						"create-behaviour only: comma-separated Field=Value pairs applied after the component is added. " +
+						"Field names are the SDK's own, and they are PascalCase: \"RespawnHeightY=-100,ForbidUserPortals=true\". " +
+						"An unknown name is reported with the fields that do exist, and the rest of the pairs still apply. " +
+						"For a UdonSharp script the values are copied into the compiled program, not just the proxy.",
+				}),
+			),
+			keepOriginal: Type.Optional(
+				Type.Union([Type.Literal("true"), Type.Literal("false")], {
+					description:
+						"convert-light only. \"true\" (default) keeps the Unity Light, \"false\" disables it -- disabled, not " +
+						"destroyed, so it can be switched back on.",
+				}),
+			),
+			material: Type.Optional(
+				Type.String({
+					description:
+						"fix-android-shaders only: the material's name. Ambiguous if several assets share it -- that is " +
+						"refused with the candidate paths rather than guessed.",
+				}),
+			),
+			shader: Type.Optional(
+				Type.String({
+					description:
+						"fix-android-shaders only: the Quest-safe shader to swap to, default VRChat/Mobile/Standard Lite. " +
+						"The VRChat/ prefix may be omitted.",
+				}),
+			),
+			position: Type.Optional(
+				Type.String({ description: 'add-spawn-point only: world position as "x,y,z". Defaults to 0,0,0.' }),
+			),
+			rotation: Type.Optional(
+				Type.String({ description: 'add-spawn-point only: Euler rotation in degrees as "x,y,z". Defaults to 0,0,0.' }),
+			),
+			shape: Type.Optional(
+				Type.String({ description: "add-collider and add-trigger only: Box, Sphere, Capsule or Mesh. Defaults to Box." }),
+			),
+			size: Type.Optional(
+				Type.String({
+					description:
+						"add-collider and add-trigger only: one number. Box uses it as the edge length, Sphere as the radius, " +
+						"Capsule as the radius with height set to twice that. Ignored for Mesh, which takes its geometry from " +
+						"the object's mesh.",
+				}),
+			),
+			isTrigger: Type.Optional(
+				Type.Union([Type.Literal("true"), Type.Literal("false")], {
+					description:
+						"add-collider only: default true, which is what VRChat interaction uses. False makes the object BLOCK " +
+						"avatars instead of triggering.",
+				}),
+			),
+			clip: Type.Optional(
+				Type.String({
+					description:
+						"add-audio-source and set-clip-load-type: the AudioClip asset's name or its Assets path. " +
+						"An ambiguous name is refused with the matching paths.",
+				}),
+			),
+			volume: Type.Optional(
+				Type.String({ description: 'add-audio-source only: the source\'s volume, as a number such as "0.8". Defaults to 1.' }),
+			),
+			spatial: Type.Optional(
+				Type.String({
+					description:
+						'add-audio-source only: "0" (default) for 2D, non-zero for 3D. A 3D source also gets sensible ' +
+						"min/max distances when they are still Unity's 1/1 default.",
+				}),
+			),
+			loop: Type.Optional(
+				Type.Union([Type.Literal("true"), Type.Literal("false")], {
+					description: "add-audio-source only: loop the clip. Defaults to false.",
+				}),
+			),
+			loadType: Type.Optional(
+				Type.String({
+					description:
+						"set-clip-load-type only: DecompressOnLoad, CompressedInMemory or Streaming. The value is read back " +
+						"from the importer after the reimport and a mismatch is reported rather than assumed.",
+				}),
+			),
 			gameObject: Type.Optional(
-				Type.String({ description: "Target GameObject for create-light-volume or find-behaviour. Omit to create a new object." }),
+				Type.String({
+					description:
+						"Target GameObject for create-light-volume, find-behaviour, convert-light, create-behaviour and the " +
+						"<package>-set actions. Omit to create a new object (create-light-volume), or to search the whole " +
+						"scene (find-behaviour).",
+				}),
 			),
 			behaviour: Type.Optional(
 				Type.String({
 					description:
-						"find-behaviour only: a world behaviour name such as VRC_SceneDescriptor, VRCObjectSync, VRC_Pickup. " +
-						"Resolves by simple name, so it reports the real type rather than assuming one.",
+						"find-behaviour and create-behaviour: a world behaviour type name. Prefer the full name, e.g. " +
+						"VRC.SDK3.Components.VRCObjectSync; a bare simple name such as VRCObjectSync also resolves, " +
+						"and the result reports the real type it landed on.",
+				}),
+			),
+			tag: Type.Optional(Type.String({ description: "toggle-tag only: the Unity tag whose objects get toggled." })),
+			inactive: Type.Optional(
+				Type.Boolean({ description: "toggle-tag only: set objects with that tag INACTIVE instead of active. Defaults to false." }),
+			),
+			object: Type.Optional(
+				Type.String({
+					description:
+						"quest-add only: the scene object's name. Ambiguous if two objects share it -- that is refused, not guessed. " +
+						"The <package>-set actions take their target in gameObject.",
+				}),
+			),
+			component: Type.Optional(
+				Type.String({
+					description:
+						"quest-add only: a component type on that object, e.g. \"Light\". Without it the entry targets the " +
+						"GameObject, which can only switch Active, Tag, Layer and static flags. Naming a component is what " +
+						"gives the entry that component's per-platform values.",
+				}),
+			),
+			path: Type.Optional(Type.String({ description: "quest-add only: an asset path, e.g. \"Assets/Materials/Wood.mat\", instead of a scene object." })),
+			target: Type.Optional(
+				Type.Union([Type.Literal("pc"), Type.Literal("android")], {
+					description: "quest-apply only. \"pc\" or \"android\" (quest). Defaults to pc.",
 				}),
 			),
 			lightType: Type.Optional(
@@ -848,10 +1025,14 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 					description: "create-light-volume only. Defaults to PointLight.",
 				}),
 			),
-			range: Type.Optional(Type.Number({ description: "create-light-volume only. Metres. Defaults to 10.", minimum: 0 })),
-			intensity: Type.Optional(Type.Number({ description: "create-light-volume only. Defaults to 1." })),
+			range: Type.Optional(
+				Type.Number({ description: "create-light-volume and convert-light. Metres, fractional allowed. 0 or omitted on convert-light means use the light's own range.", minimum: 0 }),
+			),
+			intensity: Type.Optional(
+				Type.Number({ description: "create-light-volume and convert-light. Fractional allowed. 0 or omitted on convert-light means use the light's own intensity." }),
+			),
 			color: Type.Optional(
-				Type.String({ description: "create-light-volume only: hex colour, e.g. \"ff8844\". Alpha is always 1.", default: "ffffff" }),
+				Type.String({ description: "create-light-volume and convert-light: hex colour, e.g. \"ff8844\". Alpha is always 1.", default: "ffffff" }),
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
@@ -869,6 +1050,28 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 				range: params.range,
 				intensity: params.intensity,
 				color: params.color,
+				tag: params.tag,
+				inactive: params.inactive,
+				object: params.object,
+				component: params.component,
+				path: params.path,
+				target: params.target,
+				property: params.property,
+				value: params.value,
+				fields: params.fields,
+				keepOriginal: params.keepOriginal,
+				material: params.material,
+				shader: params.shader,
+				position: params.position,
+				rotation: params.rotation,
+				shape: params.shape,
+				size: params.size,
+				isTrigger: params.isTrigger,
+				clip: params.clip,
+				volume: params.volume,
+				spatial: params.spatial,
+				loop: params.loop,
+				loadType: params.loadType,
 			});
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},

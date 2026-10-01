@@ -65,14 +65,34 @@ the package set rather than in the scene.
 | `vrc action=vrcfury-list` | Which VRCFury elements can be added. |
 | `vrc action=liltoon-usage` / `liltoon-material` | Which materials use lilToon, and how one is configured. |
 | `vrc action=path` | A bone's transform path under the avatar. |
-| `world action=scene` | Packages, `VRC_SceneDescriptor`, Udon counts, world behaviours, light volumes — the whole picture in one call. |
+| `world action=scene` | Packages, the scene descriptor (by its real resolved type), Udon counts, world behaviours, light volumes — the whole picture in one call. |
 | `world action=descriptor` / `light-volumes` / `udon` / `find-behaviour` | Each of those in detail. |
+| `world action=toolkit-state` | Whether the project is SET UP: VRChat layers and collision matrix, post-processing on the reference camera, and any scene material on a shader that is not Android-safe. |
+| `world action=quest-switch` | EasyQuestSwitch's switch set, and per entry which PC/Quest values differ. |
+| `world action=build-checks` | VRChat's own upload validation, run WITHOUT uploading: each check PASS/FAIL/WARN, plus a verdict line. Never invokes the SDK's build callbacks (VRWorld Toolkit's opens a modal dialog). Carries the script compile state — read that check first, because a script error means every other line describes the last compile that succeeded. |
+| `world action=upload-risk` | Asset sizes against VRChat's limits (derived figures marked `[ESTIMATE]`), audio/texture import settings, Android-unsafe shaders, and a ranked top-5. |
+| `world action=performance` | A PROXY for VRChat's build rating — what the scene contains and the biggest levers on it. Not the rating. |
+| `world action=environment` | Skybox, ambient, fog, lights, the descriptor's reference camera and its `PostProcessLayer`, volumes, and what the scene does NOT configure. |
+| `world action=udon-inventory` | Every UdonBehaviour with program id, program SIZE, error flag, sync method and public variables — read from the COMPILED program's table, not the proxy's, so a value set on a UdonSharp proxy and never copied shows up as absent (which is the finding). |
+| `world action=audio-link` / `yama` / `hand-menu` | Every component of those packages in the scene with its fields — the field names are unguessable, so read them rather than assume. |
+| `world action=materials` | Every material the scene's renderers use: its shader, whether that shader is Android-safe (against VRWorld Toolkit's own whitelist), and which properties are set. |
+| `world action=spawn-points` | The descriptor's `spawns` array, with each entry's position and rotation. |
+| `world action=colliders` | Every collider in the scene with shape, size, isTrigger and layer — plus the non-convex ones a Quest build rejects. |
+| `world action=audio` | AudioSources with clip, volume, spatial blend and distance; every clip the scene references with its importer load type. |
 
 **Mutating actions** — never call these while analysing: `vrc action=
-ensure-trace-and-optimize` and `vrc action=vrcfury-add` add components, and
-`world action=create-light-volume` creates objects. Report that one is missing
-and let the user decide; adding `TraceAndOptimize` to someone's avatar is a
-build-affecting change, not an observation.
+ensure-trace-and-optimize` and `vrc action=vrcfury-add` add components,
+`world action=create-light-volume`, `create-behaviour`, `convert-light`,
+`add-spawn-point`, `add-collider`, `add-trigger`, `add-audio-source` and
+`set-clip-load-type` create or change scene objects (the last one changes an
+asset's import settings on disk), the `<package>-set` actions write a field, `fix-android-shaders`
+changes a material's shader, and
+the world setup actions (`setup-layers`, `setup-post-processing`, `toggle-tag`,
+`quest-add`, `quest-apply`) change project settings or scene objects. Report that
+one is missing and let the user decide; adding `TraceAndOptimize` to someone's
+avatar is a build-affecting change, not an observation. Note that `quest-apply`
+also leaves the scene modified and unsaved even though it does not touch the
+project's build target.
 
 Two findings worth surfacing rather than fixing silently:
 

@@ -286,6 +286,30 @@ namespace PiUnity
 			status.OpenObject();
 			status.AddBool("isCompiling", EditorApplication.isCompiling);
 			status.AddString("lastError", LastCompileError);
+			// The full set, because "first error" alone leaves a caller fixing
+			// one problem at a time when the compiler already said all of them.
+			var errors = CompileErrorMessages();
+			var messages = new Json();
+			messages.OpenArray();
+			foreach (string message in errors) messages.AddString(message);
+			messages.CloseArray();
+			status.AddValue("errors", messages);
+			// errors.Count, not the Json array's item count: the writer tracks
+			// nesting and a flat array of strings does not populate it.
+			status.AddNumber("errorCount", errors.Count);
+			// A script file newer than the output assembly is a script that has
+			// never built, which an empty error list cannot reveal: a project
+			// whose every script is broken simply stops logging.
+			var pending = ScriptsNeedingCompile();
+			Json stale = new Json();
+			stale.OpenArray();
+			foreach (string script in pending) stale.AddString(script);
+			stale.CloseArray();
+			status.AddValue("scriptsNeedingCompile", stale);
+			// pending.Count, not stale.items.Count: the writer tracks nesting and
+			// a flat array of strings does not populate it.
+			status.AddBool("needsCompile", pending.Count > 0);
+			status.AddString("logPath", FindEditorLogPath() ?? "");
 			status.AddString("projectPath", ProjectRoot());
 			status.CloseObject();
 			return status;

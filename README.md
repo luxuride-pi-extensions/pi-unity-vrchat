@@ -218,7 +218,7 @@ build that skipped your code.
 | `unity_instantiate_prefab` | Place a prefab asset into the scene, positioned, in one call. Returns the instance's scene path. |
 | `unity_geometry_probe` | **Measure** the scene: world bounds, thin/long axis vs an expected axis, closest-surface distance and interpenetration between a pair, non-manifold/loose/duplicate counts. Read-only, and the Unity counterpart to `blender_geometry_probe`. |
 | `unity_vrc` | **VRChat avatar** helpers: package/optimizer readiness, VRCFury, lilToon, bone paths. |
-| `unity_world` | **VRChat world** helpers: light volumes, Udon, scene descriptor. |
+| `unity_world` | **VRChat world** helpers: scene descriptor, Udon inventory, light volumes, build/upload checks, AudioLink / Yama Stream / VRChat Hand Menu, VRWorld Toolkit, EasyQuestSwitch, plus authoring for materials, spawn points, colliders/triggers and audio. 37 actions — `world action=actions` lists them. |
 | `unity_render` | Render through a **camera** with the real lighting and materials. |
 | `unity_capture_view` | Capture the **Scene view** — the iteration loop's feedback. |
 | `unity_save_view` | Save a named view. A saved view *is* a named camera. |
@@ -317,14 +317,163 @@ its script must clean them up itself.
 
 - **Verified live** for: `unity_workspace_init` (adopt + generate),
   `unity_execute_csharp`, `unity_scene_info`, `unity_bones`, `unity_inspect`,
-  `unity_set_property`, `unity_set_transform`, `unity_session_context`, and the
-  read-only `vrc` / `world` actions. Offline suites cover the request framing,
-  the cross-process lock, timeouts, and the JSON writer (43 assertions/tests).
+  `unity_set_property`, `unity_set_transform`, `unity_session_context`, the
+  read-only `vrc` / `world` actions, and these mutating `world` actions:
+  - `create-light-volume` (including that a fractional `range` / `intensity`
+    survives the round trip, and that it reuses an existing component instead
+    of stacking a second one, and that a second create gets a unique name
+    rather than silently shadowing the first under the same bare name);
+  - `convert-light` (a Unity light becomes a light volume, keeping its own
+    colour, range and intensity, refusing an area light, and disabling rather
+    than destroying the original);
+  - `create-behaviour` (adds a verified world behaviour, sets fields in the
+    same call, reports a bad field without losing the good ones, and refuses to
+    add a second copy of a behaviour already on the object);
+  - `build-checks` / `upload-risk` / `performance` / `environment` /
+    `udon-inventory` (the scene-review reports);
+  - `audio-link-set` (end to end on a freshly created AudioLink, including the
+    proxy→Udon copy — see the UdonSharp note below);
+  - `toolkit-state`, `setup-layers`, `setup-post-processing`, `toggle-tag`,
+    `quest-switch`, `quest-add`, `quest-apply` — the last exercised against a
+    scene where the entry had to be created, since the package's own window is
+    the only other thing that can create it.
+  - `materials` / `fix-android-shaders` (a material swapped onto an
+    Android-safe shader with its colour, texture, tiling, metallic and
+    glossiness carried across — **the swap is written to the `.mat` asset on
+    disk**, so it is not undone by a scene revert);
+  - `spawn-points` / `add-spawn-point` (growing `descriptor.spawns` and
+    reading the array back to confirm the count);
+  - `colliders` / `add-collider` / `add-trigger` (including that the action
+    refuses rather than crashing on an abstract trigger type — see the
+    UdonSharp/abstract note below);
+  - `audio` / `add-audio-source` / `set-clip-load-type` (the last verified by
+    re-reading the importer after `ImportAsset`, which is the only way to tell a
+    real persistence from a reflected write that looks successful).
+  Offline suites cover the request framing, the cross-process lock, timeouts,
+  and the JSON writer (55 assertions in the bridge suite).
 - **Never exercised live:** `unity_module_run` / `unity_module_revert` with a
-  real revert, `unity_capture_view` against a non-trivial Scene view, and every
-  mutating `vrc` / `world` action (`ensure-trace-and-optimize`, `vrcfury-add`,
-  `create-light-volume`). They compile and their read paths are tested; treat
-  the first real use as the integration test.
+  real revert, `unity_capture_view` against a non-trivial Scene view, and the
+  mutating `vrc` actions (`ensure-trace-and-optimize`, `vrcfury-add`). They
+  compile and their read paths are tested; treat the first real use as the
+  integration test.
+- **A UdonSharp component added by plain `AddComponent` is a half-built
+  object.** UdonSharp keeps a proxy MonoBehaviour paired with the
+  `UdonBehaviour` its program actually compiles to, and only the package's own
+  editor extension creates that pair — the Inspector's "Add Component" and
+  `UdonSharpComponentExtensions.AddUdonSharpComponent` both call
+  `RunBehaviourSetup`; nothing else does. A proxy with no backing
+  `UdonBehaviour` makes `UdonSharpEditorUtility.CopyProxyToUdon` throw
+  `ArgumentNullException` from its formatter, and **every field write to it is
+  then discarded at build time**, silently. `create-behaviour` routes through
+  the package's add path and reports when it did; the `-set` actions check for
+  the backing behaviour first and say so when it is missing rather than
+  claiming the value was copied. `CreateBehaviourForProxy` is not a
+  workaround — it just calls the same copy.
+- **`build-checks` never invokes the SDK's build callbacks.** VRChat's own
+  `VRCBuildPipelineCallbacks.OnVRCSDKBuildRequested` is public and callable,
+  and VRWorld Toolkit's callback opens a modal
+  `EditorUtility.DisplayDialogComplex` when the scene descriptor has no spawn
+  points or holds duplicate `PipelineManager` components — a bridge request
+  would hang the Editor on a dialog nobody can click. So `build-checks` drives
+  `VRC.SDKBase.Validation.ValidationUtils` / `WorldValidation` directly and
+  reimplements those two checks read-only.
+- **A whitelist read needs the non-public binding flags.** The SDK's
+  component-type whitelists are non-public static `string[]` fields on
+  `VRC.SDKBase.Validation.WorldValidation` (`ComponentTypeWhiteListCommon` and
+  friends), and `ValidationUtils.GetCachedWhitelistedTypes` only binds with a
+  by-ref `out HashSet<Type>` and returns false for every name the SDK knows —
+  the names come from an SDK config resource, not from string literals. A
+  public-only read degrades the illegal-component check to "not available",
+  which is the honest outcome rather than a false pass.
+- **`Enum.ToObject` does not take a name.** It accepts a numeric value or an
+  enum value and throws `ArgumentException: The value passed in must be an enum
+  base or an underlying type for an enum` for a string, which reads like a type
+  mismatch rather than the wrong overload. `Enum.Parse` is the one that takes a
+  name. Anything driven by a caller-supplied enum name goes through
+  `PiAudio.ParseEnum`, which matches case-insensitively and lists the real
+  members when the name is wrong.
+- **`VRC_Trigger` is abstract in the current SDK.** `VRC.SDKBase.VRC_Trigger`
+  and both `VRCInteractable` types are abstract, and
+  `GameObject.AddComponent(<abstract type>)` returns null *silently* instead of
+  throwing — which is how `add-trigger` first failed with a bare
+  `NullReferenceException`. The action now checks `IsAbstract` and says that the
+  trigger behaviour is UdonSharp in this SDK (with the collider as its volume)
+  rather than crashing.
+- **`Undo.RecordObject` after an `AddComponent` is not an undo step.** Measured
+  on Unity 2022.3, reverting with `Undo.RevertAllDownToGroup`:
+
+  | pattern | Ctrl-Z removes it? |
+  | --- | --- |
+  | `Undo.AddComponent(go, typeof(C))` | **yes** |
+  | `AddComponent(C)` then `Undo.RecordObject(go)` | no |
+  | `AddComponent(C)` then `Undo.RegisterCompleteObjectUndo(go)` | no |
+  | `Undo.RecordObject(go)` then `AddComponent(C)` | no |
+
+  `RecordObject` snapshots state as it is *now*, so every after-the-fact variant
+  records a state that already contains the component; and a plain-`AddComponent`'d
+  component is not part of the GameObject's undo state at all. Every `add-` action
+  therefore adds through `Undo.AddComponent`, and records the *component* before
+  its field writes, because a record on the GameObject captures none of them.
+- **A `Undo` claim in a report is only worth what was measured.** The undo line
+  each action prints used to be the *intent* ("recorded as one undo step")
+  rather than the outcome, which is why a whole set of them was wrong. If you
+  see `undo: NOT registered`, the operation happened but nothing will take it
+  back for you.
+- **Euler angles wrap at 360.** Asking for a rotation of `0,-45,0` puts it back
+  on the transform as `0,315,0`, and a raw triple comparison calls a correctly
+  placed object a mismatch. `SameRotation` compares with `Mathf.DeltaAngle` and
+  the report says so in words when the two triples are one rotation.
+- **A clone written to `Assets/` is not imported yet.** Dropping a `.wav` into
+  the project directory does not make it findable: `FindAssets("t:AudioClip")`
+  and `LoadAssetAtPath` both miss it until an
+  `AssetDatabase.Refresh(ForceSynchronousImport)` has run. An action that
+  reports "was not found as a clip asset" right after a file appeared is
+  usually this, not a bad name.
+- **Compile errors are read from the Editor log, not from the compilation
+  event.** `CompilationPipeline.compilationFinished` hands over a plain
+  `object` -- in 2022.3.22f1 it is the Bee build driver -- and Unity exposes no
+  `CompilationContext.GetMessages`, so an event-driven reader cannot see a
+  single diagnostic. `compile-status` and `unity_world action=build-checks`
+  instead parse the tail of `Editor.log` for `error CS####` lines, and
+  `build-checks` **fails** on any of them. Three details make that honest:
+  - Unity writes each error to the log several times, so lines are deduped to
+    the newest per source file.
+  - The log survives the fix, so a stale error would be reported against code
+    that now compiles. An error is therefore dropped when its file is OLDER
+    than the assembly that would contain it (Unity only rewrites an assembly
+    when its compile succeeds) or when the file no longer exists. A missing
+    assembly keeps the error live, which is the safe direction.
+  - A project whose EVERY script is broken never rewrites its assemblies and
+    then goes quiet, so an empty error list would read as success.
+    `scriptsNeedingCompile` lists any `Assets/**/*.cs` newer than
+    `Assembly-CSharp.dll`, and `build-checks` fails on that too.
+- **A UdonSharp script needs a program asset, and writing the `.cs` is not
+  enough.** `UdonSharpEditorUtility.GetUdonSharpProgramAsset` builds its lookup
+  by *scanning program assets that already exist*, so a script you just wrote
+  has no program until a `.asset` sits beside it — and
+  `UdonSharpComponentExtensions.AddUdonSharpComponent` then throws a bare
+  `NullReferenceException` from inside the package, several frames down and
+  naming nothing. `create-behaviour` now creates that asset
+  (`PiUdon.EnsureProgramAsset`) and names it in its report. The asset type is
+  **`UdonSharp.UdonSharpProgramAsset`**, not the `UdonSharpEditor.*` namespace
+  its own source file suggests. Watch for a stale `ZoneAudioVolume.asset`-style
+  orphan in `git status` after deleting a script: the `.cs` and the `.asset`
+  are two files and deleting one leaves the other.
+- **Writing a UdonSharp proxy's field is not the same as setting the value the
+  program runs with.** The proxy carries its own copy of every field, so
+  `create-behaviour { fields: "taps=7" }` used to write the proxy and nothing
+  else — and since `udon-inventory` reads the *UdonBehaviour's* variable table,
+  the value read back as absent, which looks exactly like a lost write.
+  `create-behaviour` now copies the proxy across after writing fields, and
+  `PiPackages.CopyProxyToUdon` is shared with the `audio-link-set` / `yama-set` /
+  `hand-menu-set` actions rather than duplicated. Saving the scene in the Editor
+  normally does the same job, so if you see this warning the copy failed for a
+  reason UdonSharp chose not to explain.
+- **A full script compile in this project takes 4-6 minutes**, so a bridge call
+  that asks for a compile and then waits will time out. Request the compile in
+  one short call, then check `compile-status` in another; do not poll from
+  inside a single C# snippet, because the Editor cannot answer you mid-compile
+  and the call simply dies at the tool timeout.
 - **Licensing.** Unity is installed under a **flatpak Hub** on this machine, so
   the licence lives in the sandbox at
   `~/.var/app/com.unity.UnityHub/config/unity3d/Unity/licenses/`, not in the

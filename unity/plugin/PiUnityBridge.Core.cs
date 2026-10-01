@@ -61,10 +61,6 @@ namespace PiUnity
 
 			Configure(configured);
 			EditorApplication.update += Poll;
-			// CompilationPipeline, not CompilePipeline -- adding the namespace
-			// alone left the name unresolved (CS0103).
-			CompilationPipeline.compilationFinished += OnCompilationFinished;
-			EditorApplication.delayCall += () => { LastCompileError = ""; };
 		}
 
 		private static void Configure(string dir)

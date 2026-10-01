@@ -53,9 +53,16 @@ export async function unitySaveView(options: SaveViewOptions): Promise<SaveViewR
  * Read-only scene pass used to validate that a camera exists before binding a
  * saved view to it. Without this the manifest would happily record a name that
  * no camera can ever match.
+ *
+ * The caller passes its workspace path even though nothing here reads it: the
+ * parameter is kept so a future scoped lookup has a home and so the call site
+ * reads as the question it is ("in THIS workspace, is there such a camera").
+ * The bridge is process-wide and answers from the open project either way, so
+ * using the value without being able to scope by it would be worse than saying
+ * nothing about it.
  */
 export async function assertCameraExists(
-	workspacePath: string,
+	_workspacePath: string,
 	cameraName: string,
 ): Promise<void> {
 	const info = await requestLiveUnitySceneInfo(["cameras"], "save-view:cameras");
