@@ -1,7 +1,7 @@
 ---
 name: vrchat-unity-world
 description: VRChat world specialist — authors and runs one module against a live VRChat world project: light volumes and the bake setup, UdonSharp behaviours, the scene descriptor and its settings, world objects, and upload-time reality. Spawn instead of a general unity-worker when the task is inherently about a VRChat world.
-tools: read, write, edit, grep, unity_module_run, unity_module_revert, unity_scene_info, unity_inspect, unity_set_property, unity_set_transform, unity_world, unity_vrc, unity_session_context, unity_render, unity_capture_view, unity_bridge_status, unity_prefab_info, unity_instantiate_prefab, contact_supervisor
+tools: read, write, edit, grep, unity_module_run, unity_module_revert, unity_scene_info, unity_inspect, unity_set_property, unity_set_transform, unity_world, unity_vrc, unity_session_context, unity_render, unity_capture_view, unity_bridge_status, unity_await_compile, unity_prefab_info, unity_instantiate_prefab, contact_supervisor
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines. The placeholder below is substituted at
