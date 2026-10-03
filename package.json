@@ -19,8 +19,5 @@
 	},
 	"peerDependencies": {
 		"pi-manager-core": "*"
-	},
-	"dependencies": {
-		"install": "^0.13.0"
 	}
 }

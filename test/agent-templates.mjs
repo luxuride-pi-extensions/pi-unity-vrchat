@@ -51,6 +51,12 @@ import { INSTALLED_EXTENSIONS, JITI } from "./paths.mjs";
  * never sees a local extension providing it. It was missing here and the suite
  * reported the two manager templates as shipping an unresolvable tool, which is
  * the cry-wolf failure this file exists to prevent.
+ *
+ * The context-management tools are a fourth kind, and the subtler one: they are
+ * supplied by the ACP proxy in front of the session, so they exist at runtime
+ * and are resolvable by pi while appearing in NO extension directory and in
+ * nothing this file can import. A manager template naming one is correct, and
+ * asserting otherwise says the template is broken when it is not.
  */
 const AMBIENT_TOOLS = new Set([
 	"subagent",
@@ -66,6 +72,11 @@ const AMBIENT_TOOLS = new Set([
 	"find",
 	"ls",
 	"ask_user_question",
+	"compress",
+	"decompress",
+	"search_context",
+	"acp_status",
+	"acp_cache",
 ]);
 
 const { createJiti } = await import(JITI);

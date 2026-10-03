@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit tests and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --legacy-peer-deps is not optional here. package.json declares
+      # peerDependencies: { "pi-manager-core": "*" }, which is the documented
+      # shape for a Pi package (docs/packages.md): it is loaded from the
+      # extensions directory, not installed from the registry. Plain `npm ci`
+      # therefore fails with 404 on a package that was never published, before a
+      # single test runs.
+      - run: npm ci --legacy-peer-deps
+      - run: npm run typecheck
+      - run: npm test
+
+  manager-core:
+    name: manager-core consistency
+    # Two other repositories, both PRIVATE. Skipped rather than failed without
+    # the credential: not having a PAT is a configuration state, and a red
+    # check for it would train everyone to ignore the job.
+    if: ${{ secrets.CONSUMER_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      # pi-manager-core first, so this repo lands in a subdirectory and the
+      # sibling checkouts can go beside it -- which is the layout
+      # resolver-copies and allowlists look for, the same one the four repos
+      # have in a working directory.
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-manager-core
+          ref: master
+          path: projects/pi-manager-core
+          # github.token cannot read a PRIVATE repository.
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      # The two extensions this repo's own tests compose their prompts from.
+      # agent-templates.mjs resolves a template's tools by loading every
+      # extension named in it, out of the INSTALLED extensions dir, and
+      # engagement-test.mjs asserts two managers stay silent until engaged --
+      # both against extensions that have to exist. On a runner none do.
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-blender
+          ref: master
+          path: projects/pi-blender
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      - uses: actions/checkout@v4
+        with:
+          repository: luxuride-pi-extensions/pi-unity-blender
+          ref: master
+          path: projects/pi-unity-blender
+          token: ${{ secrets.CONSUMER_TOKEN }}
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install the manager core
+        working-directory: projects/pi-manager-core
+        run: npm ci
+
+      - name: install the sibling extensions
+        run: |
+          for repo in pi-blender pi-unity-blender; do
+            (cd "projects/$repo" && npm ci --legacy-peer-deps)
+          done
+
+      # Names pi installs under, which are not the repo names: the binder
+      # extension is "unity-blender", and pi's own resolver probes both
+      # "manager-core" and "pi-manager-core" when a consumer looks for it.
+      - name: install the extensions the way pi does
+        run: |
+          agent="$RUNNER_TEMP/agent-dir/extensions"
+          mkdir -p "$agent"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-unity"       "$agent/pi-unity"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"     "$agent/pi-blender"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender" "$agent/unity-blender"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core" "$agent/manager-core"
+
+      - name: install and test
+        env:
+          PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
+          PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
+        run: |
+          npm ci --legacy-peer-deps
+          npm run typecheck
+          npm test
+
+      # The core's own cross-repo checks, run against the sibling checkouts
+      # above: resolver-copies diffs this repo's manager-core.ts and
+      # agent-template-checks.mjs against the canonical files, allowlists
+      # asserts every tool this manager's prompt names is in the index.ts
+      # allowlist, and dependency-declaration asserts the peer range.
+      #
+      # pi-manager-core's own CI runs these same checks against all three
+      # consumers. Running them here as well means a change here fails a check
+      # in the PR that made it, rather than only in the core's next run.
+      - name: cross-repo consistency checks
+        working-directory: projects/pi-manager-core
+        run: |
+          for check in resolver-copies allowlists dependency-declaration agent-rosters; do
+            echo "==> $check"
+            node test/$check.mjs
+          done
+
+  plugin:
+    name: C# plugin self-tests
+    # Deliberately manual. These need a Unity Editor install and a licence
+    # (unity-ci/activate-unity-editor), plus a project with a populated
+    # Library/Bee to borrow a reference set from -- none of which belongs in a
+    # required check on a pull request.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --legacy-peer-deps
+
+      - name: compile the plugin against Unity's own assemblies
+        run: bash test/compile-plugin.sh
+
+      - run: npm run test:selftests
