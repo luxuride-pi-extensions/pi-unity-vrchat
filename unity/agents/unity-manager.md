@@ -27,7 +27,7 @@
 # This file is not installed as a child, so recording it there would claim a
 # dependency nothing resolves. If this prompt ever becomes installable again,
 # the package belongs in the list.
-tools: subagent, subagents_enable, bg_wait, subagent_supervisor, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique, unity_prefab_info
+tools: subagent, subagents_enable, bg_wait, subagent_supervisor, compress, decompress, search_context, acp_status, acp_cache, read, todo, ask_user_question, grep, find, ls, contact_supervisor, unity_workspace_init, unity_scene_info, unity_session_context, unity_bridge_status, unity_bones, unity_inspect, unity_vrc, unity_world, unity_source_models, unity_module_revert, unity_log_critique, unity_prefab_info, unity_compose_prefab
 # `extensions:` must be an ABSOLUTE path: pi-subagents resolves only `.`/`..`
 # segments here, never `~` and never an env var, so a host path cannot be both
 # committed and correct on two machines.
@@ -189,6 +189,68 @@ convention is missing from this list it does not exist.
   state but does NOT roll back assets written under `Assets/`. A module that
   wrote an asset and was then reverted has left that asset behind.
 - **Never restate tool schemas in prose.** Use the tool definitions directly.
+
+## Prefabs: one object, or a part of the world
+
+There are two kinds of prefab here and they are not interchangeable. This is a
+project rule, not a preference — brief it to workers, and reject a module that
+breaks it.
+
+A prefab is one of exactly two things, and nothing else is a prefab:
+
+1. **A single object** — one thing you place, move and replace.
+2. **A part of the world** — a house, an island, a furnished room, a bridge with
+   its piers, an avatar with an outfit: a thing that only means anything together
+   and is placed together, and that is built by *recursively reusing smaller
+   prefabs*.
+
+A prefab that is neither is a mistake with a name on it. In particular **furniture
+is never bundled as furniture**: a `Furniture` prefab holding 25 chairs is 25
+items you cannot place separately, at 25 different places. Editing one of them
+means editing the FBX all 25 came from, and every instance changes. "Furniture" is
+a category, not a unit — and a category is exactly the kind of grouping that hides
+the real units.
+
+**A single-object prefab holds ONE model**, and "one model" means one *placeable
+unit*, not one mesh. A tree exported as stem, branches and leaves is ONE model and
+belongs in ONE prefab: that is what you place, move, and replace. The test is
+whether you would ever want to place half of it. If the answer is no, it is one
+model.
+
+- When a Blender export or a bridge transfer produces an FBX holding several
+  independent items, that is a modelling/export problem to fix at the source
+  (split the objects, export each), not something to paper over by naming the
+  wrapper "a prefab".
+
+**A part-of-the-world prefab holds PREFABS, and reuses them recursively.**
+`unity_compose_prefab` builds one from existing prefabs as nested instances, and a
+composite may itself be a member of a larger composite — an island containing a
+house containing furniture, each level a nested prefab, all the way down. There is
+no depth limit; what matters is that every level is a reference.
+
+- If `isPrefabOfPrefabs` is false, or `nestedCount` is below `memberCount`, some
+  member did not land as a reference. Say so in the module's report — do not
+  present it as a composed prefab.
+- Never ask a worker to merge a composite's meshes. A merged composite looks
+  identical to a nested one and silently stops following the models it claims to
+  be built from.
+- To change a composite, delete it and compose it again from the current
+  members (the tool refuses to overwrite). To change a member, edit the member
+  prefab — with `space: "asset"` — and every composite that references it
+  follows.
+
+**Materials in a VRChat project are PC/Quest, not one material.** A model prefab
+that carries its FBX's embedded material is not finished:
+
+- PC and Android need different materials, either as two variants switched with
+  EasyQuestSwitch or as an EasyQuestSwitch entry on one prefab. Check with
+  `unity_world { action: "quest-switch" }`, and add with
+  `unity_world { action: "quest-add" }`.
+- If the project has no EasyQuestSwitch, then build it for **PC only** and say
+  so in the report. Do not invent an Android fallback, and do not leave a
+  Quest-incompatible material in place without flagging it.
+- Use `unity_world { action: "toolkit-state" }` to list the scene's materials
+  that are not on a Quest-safe shader, and `fix-android-shaders` to swap one.
 
 ## Live Unity state
 

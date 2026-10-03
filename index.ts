@@ -1,7 +1,7 @@
 /**
  * pi extension: Unity integration.
  *
- * Registers 19 unity_* tools + bundled skills, the /unity slash command, and
+ * Registers 24 unity_* tools + bundled skills, the /unity slash command, and
  * injects the manager prompt + live Editor state before turns that engage
  * the extension.
  *
@@ -34,6 +34,7 @@ import {
 	requestLiveUnityGeometryProbe,
 	requestLiveUnityInstantiatePrefab,
 	requestLiveUnityPrefabInfo,
+	requestLiveUnityComposePrefab,
 	unityCaptureView,
 	requestLiveUnityVrc,
 	requestLiveUnityWorld,
@@ -112,6 +113,24 @@ const managerMode = core.createManagerMode({
 		"bg_wait",
 		"subagent_supervisor",
 		"contact_supervisor",
+		// Context management, from the ambient billion-context plugin. A
+		// manager is the one role whose transcript grows without bound: workers
+		// and critics each start fresh, but the manager reads every brief,
+		// report and verdict for a whole build. It is also the only role that can
+		// afford to lose detail, because everything it still needs is in `todo`
+		// and in what it wrote down.
+		//
+		// Named explicitly because the gate is deny-by-default and the gate is
+		// the only thing between a manager and an unbounded transcript. pi
+		// itself ships no compression tool, so listing a tool the session does
+		// not have is harmless -- a call naming an absent tool is never made --
+		// while omitting one that IS present is how a 100k session re-reads a
+		// build it already summarized.
+		"compress",
+		"decompress",
+		"search_context",
+		"acp_status",
+		"acp_cache",
 		// Planning and reading agent definitions to write a brief with.
 		"todo",
 		"read",
@@ -132,6 +151,11 @@ const managerMode = core.createManagerMode({
 		"unity_module_revert",
 		"unity_log_critique",
 		"unity_prefab_info",
+		// Naming a tool in the manager prompt while leaving it out of this list
+		// is not a harmless omission: the gate is deny-by-default, so the manager
+		// reads a brief that tells it to compose a composite prefab and is then
+		// refused the one call that does it. Keep the two in step.
+		"unity_compose_prefab",
 		"unity_geometry_probe",
 	],
 	// The roster's RULE is the core's; only the names are ours. This manager had
@@ -554,6 +578,51 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 				position: params.position,
 				rotation: params.rotation,
 				scale: params.scale,
+			});
+			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
+		},
+	});
+
+	pi.registerTool({
+		name: "unity_compose_prefab",
+		label: "Unity Compose Prefab",
+		description:
+			"Build ONE part-of-the-world prefab whose members are NESTED PREFAB INSTANCES of the prefabs you pass. Never merged geometry. " +
+			"A prefab is one of two things: a single OBJECT (one placeable unit -- a tree exported as stem, branches and leaves is one object and one prefab, because that is what you place, move and replace), or a PART OF THE WORLD -- a house, an island, a furnished room, a bridge with its piers, an avatar with an outfit. This tool builds the second kind. " +
+			"Furniture is never bundled as furniture: a prefab fusing 25 chairs is 25 items nobody can place separately, and editing one means editing the file all 25 came from. A category is not a unit. " +
+			"Reuse is RECURSIVE with no depth limit: a member may itself be a composite, so an island can hold a house that holds furniture, every level a nested prefab reference. Editing the chair prefab changes the chair in the house in the island. " +
+			"Each member is {prefabPath, name?, position?, rotation?, scale?}, where prefabPath is ASSET-RELATIVE and must be an actual PREFAB -- an FBX/OBJ is a model asset and is refused, because it is not something a composite can nest. " +
+			"The result re-reads the saved asset and reports nestedCount / isPrefabOfPrefabs, so a member that did not land as a reference is named rather than discovered later. " +
+			"Refuses to overwrite an existing composite: a composite is rebuilt from its members (delete it and compose again) because nothing it holds is not already in the members. " +
+			"Place the finished composite with unity_instantiate_prefab; edit a member with unity_set_property { space: \"asset\" } so the change reaches every composite that references it.",
+		parameters: Type.Object({
+			workspace: Type.Optional(
+				Type.String({ description: "Explicit workspace path. Relative paths resolve from the current working directory." }),
+			),
+			destination: Type.String({
+				description: 'Asset-relative folder inside Assets/ for the composite, e.g. "Assets/Homeworld/HouseJapanese".',
+			}),
+			name: Type.String({
+				description: "Composite prefab name, used as the file name. Illegal filename characters are refused.",
+			}),
+			members: Type.Array(
+				Type.Object({
+					prefabPath: Type.String({
+						description: 'Asset-relative PREFAB path, e.g. "Assets/Homeworld/Furniture/Homeworld_Furn_Chair.prefab".',
+					}),
+					name: Type.Optional(Type.String({ description: "Name for this member inside the composite. Defaults to the prefab's own name." })),
+					position: Type.Optional(Type.String({ description: 'LOCAL position as "x,y,z". Default "0,0,0".' })),
+					rotation: Type.Optional(Type.String({ description: 'LOCAL rotation in Euler DEGREES as "x,y,z". Default "0,0,0".' })),
+					scale: Type.Optional(Type.String({ description: 'LOCAL scale as "x,y,z". Default "1,1,1".' })),
+				}),
+				{ description: "The prefabs this part-of-the-world is made of, in placement order. Each may itself be a composite." },
+			),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+			const result = await requestLiveUnityComposePrefab({
+				destination: params.destination,
+				name: params.name,
+				members: params.members ?? [],
 			});
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
