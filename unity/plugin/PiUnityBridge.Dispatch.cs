@@ -64,6 +64,8 @@ namespace PiUnity
 					return InstantiatePrefabAsset(request);
 				case "prefab-info":
 					return GetPrefabInfo(request);
+				case "compose-prefab":
+					return ComposePrefab(request);
 				case "geometry-probe":
 					// Read-only, so it is safe while another request holds the
 					// Editor: it never writes, dirties, saves or claims an

@@ -542,6 +542,30 @@ export const requestLiveUnityPrefabInfo = (options: {
 	});
 
 /**
+ * Builds ONE composite prefab whose members are NESTED PREFAB INSTANCES.
+ *
+ * The member list is forwarded whole rather than parsed here, so the C# side is
+ * the only place that decides what a member is -- and it refuses a member
+ * before building anything, which is why a bad path in the last entry does not
+ * leave a half-written asset behind.
+ */
+export const requestLiveUnityComposePrefab = (options: {
+	destination: string;
+	name: string;
+	members: import("./types.js").UnityComposePrefabMember[];
+	timeoutMs?: number;
+}) =>
+	requestLiveUnityBridge<import("./types.js").UnityComposePrefabResult>({
+		timeoutMs: options.timeoutMs,
+		payload: {
+			type: "compose-prefab",
+			destination: options.destination,
+			name: options.name,
+			members: options.members,
+		},
+	});
+
+/**
  * Measures mesh/transform relationships and returns numbers.
  *
  * `timeoutMs` is a caller-supplied override rather than a raised default,

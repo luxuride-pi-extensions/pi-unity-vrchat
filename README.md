@@ -216,6 +216,7 @@ build that skipped your code.
 | `unity_source_models` | Which real model **files** a selection resolves to. `find` reports, `export` copies them out for another application to open verbatim. |
 | `unity_prefab_info` | What a prefab **asset** contains — children, materials, bounds — read without instantiating it. |
 | `unity_instantiate_prefab` | Place a prefab asset into the scene, positioned, in one call. Returns the instance's scene path. |
+| `unity_compose_prefab` | Build ONE part-of-the-world prefab whose members are **nested prefab instances** — never merged geometry. Members may themselves be composites, to any depth. Refuses to overwrite an existing composite. |
 | `unity_geometry_probe` | **Measure** the scene: world bounds, thin/long axis vs an expected axis, closest-surface distance and interpenetration between a pair, non-manifold/loose/duplicate counts. Read-only, and the Unity counterpart to `blender_geometry_probe`. |
 | `unity_vrc` | **VRChat avatar** helpers: package/optimizer readiness, VRCFury, lilToon, bone paths. |
 | `unity_world` | **VRChat world** helpers: scene descriptor, Udon inventory, light volumes, build/upload checks, AudioLink / Yama Stream / VRChat Hand Menu, VRWorld Toolkit, EasyQuestSwitch, plus authoring for materials, spawn points, colliders/triggers and audio. 37 actions — `world action=actions` lists them. |
@@ -249,6 +250,19 @@ step: `unity_prefab_info` to see what placing it will add, then
 a prefab's children repeat their names in every instance, so a bare name is
 refused as ambiguous the moment the asset is placed twice, while `"Chair (2)/Leg"`
 resolves exactly. Every tool that takes `gameObject` accepts either form.
+
+**A part-of-the-world is a prefab OF prefabs.** `unity_compose_prefab` builds
+one — a house, an island, a furnished room — out of existing prefabs as nested
+references, so editing the chair prefab changes the chair in the house in the
+island. Nesting is recursive with no depth limit: a member may itself be a
+composite. The result re-reads the saved asset and reports `nestedCount` and
+`isPrefabOfPrefabs`, so a member that did not land as a reference is named rather
+than discovered later — a merged composite looks identical in a render and
+silently stops following the models it claims to be built from. Furniture is
+never bundled as furniture: a prefab fusing 25 chairs is 25 items nobody can
+place separately. To change a composite, delete it and compose it again from the
+current members; to change a member, `unity_set_property { space: "asset" }` and
+every composite that references it follows.
 
 **`unity_render` vs `unity_capture_view` is the single most important
 distinction.** `unity_render` tells you how the game will look from a camera.

@@ -589,6 +589,55 @@ export interface UnityPrefabInstanceResult {
 	bounds: UnityPrefabBounds;
 }
 
+/** One member requested for a composite prefab. */
+export interface UnityComposePrefabMember {
+	/** Asset-relative PREFAB path. An FBX/OBJ model asset is refused. */
+	prefabPath: string;
+	/** Name for this member inside the composite. Defaults to the prefab's own. */
+	name?: string;
+	/** LOCAL position as "x,y,z". Default "0,0,0". */
+	position?: string;
+	/** LOCAL rotation in Euler DEGREES as "x,y,z". Default "0,0,0". */
+	rotation?: string;
+	/** LOCAL scale as "x,y,z". Default "1,1,1". */
+	scale?: string;
+}
+
+/**
+ * One member of the composite, as it landed in the SAVED asset.
+ *
+ * `landedAsReference` is the field that carries the tool's central claim: it is
+ * set only when the member is a prefab reference, so a composite that quietly
+ * baked a copy names the member here rather than looking correct in a render.
+ */
+export interface UnityComposePrefabMemberReport {
+	name: string;
+	path: string;
+	/** Asset path of the prefab this member references. Empty when it is not one. */
+	sourceAsset: string;
+	/** Diagnostic text when the member did NOT land as a reference. Empty otherwise. */
+	landedAsReference: string;
+	localPosition: number[];
+	localScale: number[];
+}
+
+/**
+ * The composite prefab that was written.
+ *
+ * `isPrefabOfPrefabs` is `nestedCount === memberCount`: true only when every
+ * requested member survived as a reference, which is the difference between a
+ * composite that follows its sources and one that looks the same and does not.
+ */
+export interface UnityComposePrefabResult {
+	prefabPath: string;
+	rootName: string;
+	memberCount: number;
+	nestedCount: number;
+	isPrefabOfPrefabs: boolean;
+	members: UnityComposePrefabMemberReport[];
+	bounds: UnityPrefabBounds;
+}
+
 /**
  * One candidate log location, probed rather than asserted.
  *

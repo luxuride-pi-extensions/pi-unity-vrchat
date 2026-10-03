@@ -660,6 +660,53 @@ await withEditor(async ({ dir }) => {
 		JSON.stringify(placed),
 	);
 
+	// compose-prefab's whole contract is that members land as REFERENCES, and
+	// the members array is the only thing that can drop them on the way to the
+	// bridge -- a payload whose members went missing would compose an empty
+	// prefab and still report success.
+	const composed = await bridge.requestLiveUnityComposePrefab({
+		destination: "Assets/Homeworld/HouseJapanese",
+		name: "HouseJapanese",
+		members: [
+			{ prefabPath: "Assets/Homeworld/Furniture/Homeworld_Furn_Chair.prefab", position: "1,0,0" },
+			{ prefabPath: "Assets/Homeworld/Furniture/Homeworld_Furn_Table.prefab", name: "DiningTable" },
+			{ prefabPath: "Assets/Homeworld/Props/BakedRock.fbx", name: "BakedRock" },
+		],
+	});
+	check(
+		"compose-prefab carries the destination and name into the asset path it reports",
+		composed?.prefabPath === "Assets/Homeworld/HouseJapanese/HouseJapanese.prefab",
+		JSON.stringify(composed),
+	);
+	check(
+		"compose-prefab forwards every member, so none is silently dropped",
+		composed?.memberCount === 3 && (composed?.members ?? []).length === 3,
+		JSON.stringify(composed),
+	);
+	check(
+		"compose-prefab reports isPrefabOfPrefabs FALSE when a member landed baked, rather than a count that merely looks short",
+		composed?.isPrefabOfPrefabs === false &&
+			composed?.nestedCount === 2 &&
+			(composed?.members ?? []).some((m) => m.landedAsReference !== ""),
+		JSON.stringify(composed),
+	);
+	check(
+		"compose-prefab names the source asset each member references",
+		(composed?.members ?? []).filter((m) => m.sourceAsset !== "").every((m) => m.sourceAsset.endsWith(".prefab")),
+		JSON.stringify(composed),
+	);
+
+	const cleanComposite = await bridge.requestLiveUnityComposePrefab({
+		destination: "Assets/Homeworld/HouseJapanese",
+		name: "HouseJapanese",
+		members: [{ prefabPath: "Assets/Homeworld/Furniture/Homeworld_Furn_Chair.prefab" }],
+	});
+	check(
+		"compose-prefab reports a fully referenced composite as one",
+		cleanComposite?.isPrefabOfPrefabs === true && cleanComposite?.nestedCount === cleanComposite?.memberCount,
+		JSON.stringify(cleanComposite),
+	);
+
 	const find = await bridge.requestLiveUnityFindSourceModels({ gameObjectNames: ["Floor", "Chair"] });
 	check(
 		"find-source-models resolves every named object",

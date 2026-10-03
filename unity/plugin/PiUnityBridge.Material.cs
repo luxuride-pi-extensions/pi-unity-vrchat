@@ -198,7 +198,11 @@ namespace PiUnity
 			return renderer;
 		}
 
-		private static void EnsureFolder(string folder)
+		/// internal, not private, because Bridge composes a prefab into a folder
+		/// that may not exist yet. PiMaterial keeps it in one place so both call
+		/// sites create folders the same way; it is not public because a snippet's
+		/// separate assembly has no use for it.
+		internal static void EnsureFolder(string folder)
 		{
 			if (string.IsNullOrEmpty(folder) || folder == "Assets") return;
 			if (AssetDatabase.IsValidFolder(folder)) return;
