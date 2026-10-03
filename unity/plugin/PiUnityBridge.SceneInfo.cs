@@ -101,16 +101,30 @@ namespace PiUnity
 					materials.AddString("name", material.name);
 					materials.AddString("assetPath", path);
 					materials.AddString("shader", material.shader != null ? material.shader.name : "");
+					// KEYED, inside the material object.
+					//
+					// This used to be an anonymous array written here:
+					//
+					//   materials.OpenArray(); materials.Add(color.r); ... CloseArray();
+					//
+					// which is a SYNTAX ERROR in place -- it emits a bare
+					// `"[0.8,0.8,0.8,1]"`, i.e. an element position where a
+					// `"name":` pair belongs. The writer emits whatever it is told
+					// to, so nothing failed here and the bridge still reported
+					// ok:true; the whole response simply was not JSON, and the
+					// caller got "The Unity bridge wrote an unreadable response:
+					// Expected double-quoted property name in JSON at position N"
+					// instead of the scene.
+					//
+					// It only reproduces on a project where a material exposes
+					// _BaseColor (lilToon and most shader-graph pipelines do), which
+					// is why a small test scene read fine and a large avatar did
+					// not. See PiUnityBridge.Polling.cs for the guard that now turns
+					// a malformed payload into a named, located error instead of a
+					// parse failure at an offset in a 50KB single line.
 					if (material.HasProperty("_BaseColor"))
 					{
-						Color color = material.GetColor("_BaseColor");
-						// Anonymous array: an overload taking a bare key did not exist.
-						materials.OpenArray();
-						materials.Add(color.r);
-						materials.Add(color.g);
-						materials.Add(color.b);
-						materials.Add(color.a);
-						materials.CloseArray();
+						materials.AddArray("baseColor", ColorToJson(material.GetColor("_BaseColor")));
 					}
 					materials.AddString("renderQueue", material.renderQueue.ToString(CultureInfo.InvariantCulture));
 					materials.CloseObject();
