@@ -8,7 +8,7 @@
  */
 
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import { requestLiveUnityExecuteCSharp, requestLiveUnitySceneInfo } from "./bridge.js";
 import {
@@ -49,6 +49,57 @@ export interface ExecuteCSharpResult {
 	checkpointPath?: string;
 }
 
+/**
+ * Where a relative `scriptPath` belongs, and how to say so when it is missing.
+ *
+ * The documented layout is `<workspace>/modules/<name>/script.cs`
+ * (unity/skills/unity-modules/SKILL.md, unity/agents/unity-worker.md), and
+ * unity_module_run reads its script from exactly there. So a relative
+ * `scriptPath` is a path *inside the workspace*, and resolving it against the
+ * session cwd was simply the wrong root: it broke the one case the feature
+ * exists for -- adopting a project elsewhere on disk and running its modules
+ * from an unrelated session directory.
+ *
+ * The session cwd is still tried, but only AFTER the workspace and only when
+ * the file is really there, so a workspace that happens to sit inside the cwd
+ * still works. That fallback also keeps a genuine cwd-relative script usable
+ * for a session that never adopted anything.
+ *
+ * Absolute paths are used as given, still checked for existence: an absolute
+ * path that does not exist is a typo, not a root-selection question.
+ *
+ * On failure every candidate absolute path is named in the error. The old
+ * message named exactly one path and never said which root produced it, which
+ * is why the bug in #3 was hard to diagnose from the tool output alone.
+ */
+export function resolveScriptPath(scriptPath: string, workspacePath: string, cwd: string): string {
+	const trimmed = scriptPath.trim();
+	const notFound = (candidates: string[]): Error =>
+		new Error(
+			`C# script not found: ${trimmed}. ` +
+				`Tried: ${candidates.join(", ")}. ` +
+				`A relative scriptPath resolves against the workspace root first ` +
+				`(${workspacePath}), then the session cwd (${cwd}). ` +
+				`Pass an absolute path if the script lives somewhere else, or write the script first. ` +
+				`You can also pass inlineCode instead.`,
+		);
+
+	if (isAbsolute(trimmed)) {
+		if (!fileExists(trimmed)) throw notFound([trimmed]);
+		return trimmed;
+	}
+
+	// Order matters and is the fix: workspace, then cwd. Deduped because a
+	// workspace is often a subdirectory of the cwd, and naming the same path
+	// twice reads as "two roots tried" when only one was.
+	const roots = [workspacePath, cwd].filter((root, index, all) => all.indexOf(root) === index);
+	for (const root of roots) {
+		const candidate = resolve(root, trimmed);
+		if (fileExists(candidate)) return candidate;
+	}
+	throw notFound(roots.map((root) => resolve(root, trimmed)));
+}
+
 /** Saves the open scene, then copies the resulting .unity file aside. */
 const SAVE_SCENE_SNIPPET = [
 	"using UnityEditor;",
@@ -70,13 +121,8 @@ export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise
 		code = options.inlineCode;
 	} else {
 		sourcePath = options.scriptPath
-			? resolve(options.cwd, options.scriptPath)
+			? resolveScriptPath(options.scriptPath, workspacePath, options.cwd)
 			: ensureWorkspaceScriptExists(workspacePath);
-		if (!fileExists(sourcePath)) {
-			throw new Error(
-				`C# script not found: ${sourcePath}. Write the script first, or pass inlineCode.`,
-			);
-		}
 		code = readFileSync(sourcePath, "utf8");
 	}
 

@@ -20,11 +20,11 @@
  */
 
 import { Type } from "typebox";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	assertCameraExists,
 	getBundledUnitySkillsDir,
-	normalizeWorkspacePath,
 	requestLiveUnityBones,
 	requestLiveUnityInspect,
 	requestLiveUnitySetProperty,
@@ -63,6 +63,62 @@ import { loadManagerCore } from "./manager-core.js";
 const core = loadManagerCore();
 
 const LIVE_CONTEXT_PROMPT_TIMEOUT_MS = 4_000;
+
+/**
+ * The last workspace a Unity tool was pointed at, so a session that adopted a
+ * project from an unrelated directory stops lying about it.
+ *
+ * `fetchState` below runs with no `workspace` argument, so the injected block
+ * used to look for unity-workspace.json in the session cwd only. Adopt a
+ * project in E:\ from a session in C:\Downloads and every turn then reported
+ * "This project is NOT managed by pi (no unity-workspace.json at C:\...)"
+ * while the manifest sat right there in E:\ -- a wrong signal, and one the
+ * agent was meant to act on by re-running unity_workspace_init (#3).
+ *
+ * A module-level last-seen value, deliberately: there is no per-session store
+ * on ExtensionAPI, and the alternative -- threading the value through every
+ * tool call -- would mean a tool that writes the manifest is not the tool that
+ * reads it, which is the bug being fixed. Process lifetime is the session
+ * lifetime here, so this cannot leak across sessions.
+ *
+ * Reads last-seen THEN adopted, never the reverse: unity_workspace_init is
+ * authoritative for the project it just created or adopted, and a stale
+ * remembered path must not override it.
+ */
+let lastSeenWorkspace = "";
+
+/** Pointed at by unity_workspace_init, which is the only writer that knows. */
+export function rememberWorkspace(workspacePath: string): void {
+	if (workspacePath.trim()) lastSeenWorkspace = workspacePath;
+}
+
+/** The manager's best guess at which workspace this session is working in. */
+export function getRememberedWorkspace(): string {
+	return lastSeenWorkspace;
+}
+
+/**
+ * The `workspace` argument for a tool that takes one: what the caller passed,
+ * else the remembered workspace, else the session cwd.
+ *
+ * Every workspace-scoped tool already defaults an absent `workspace` to the
+ * session cwd. That default is right for a session that adopted nothing and
+ * wrong for one that did, which is why the fallback lands here rather than in
+ * each tool's `resolve(cwd, workspace ?? ".")`.
+ *
+ * The remembered value is returned VERBATIM, never re-resolved against cwd:
+ * it is already absolute (unity_workspace_init resolves it), and on Windows
+ * `resolve()` of `E:\proj` against `C:\session` yields `C:\session\E:\proj`.
+ * Only a caller-supplied relative path is resolved against the cwd.
+ */
+export function resolveToolWorkspace(cwd: string, workspace?: string): string {
+	return workspace?.trim() ? resolve(cwd, workspace.trim()) : lastSeenWorkspace || resolve(cwd, ".");
+}
+
+/** True once this session has adopted or generated a workspace. */
+export function hasRememberedWorkspace(): boolean {
+	return lastSeenWorkspace !== "";
+}
 
 /**
  * The agents this manager may spawn.
@@ -195,7 +251,22 @@ const injectUnityContext = core.createContextInjection({
 	// main thread with import and compile work, so it gets a wider prompt-timeout
 	// budget. The explicit withTimeout is kept as well as the core's own: this
 	// one rejects a HUNG bridge, and the core's message reports it.
-	fetchState: (ctx) => withTimeout(unitySessionContext({ cwd: (ctx as { cwd: string }).cwd }), LIVE_CONTEXT_PROMPT_TIMEOUT_MS),
+	// workspace: the remembered one, so an adopted project is described by its
+	// OWN manifest. unity_session_context reports live Editor state
+	// authoritatively either way, so this only decides which workspace's
+	// manifest and iteration history are consulted alongside it.
+	fetchState: (ctx) =>
+		withTimeout(
+			unitySessionContext({
+				cwd: (ctx as { cwd: string }).cwd,
+				// Undefined, not "": an empty workspace falls back to the session
+				// cwd inside unitySessionContext, and passing "" would make the
+				// injected block name the cwd even when this session never adopted
+				// anything, which is the confusing half of the state.
+				workspace: hasRememberedWorkspace() ? getRememberedWorkspace() : undefined,
+			}),
+			LIVE_CONTEXT_PROMPT_TIMEOUT_MS,
+		),
 	formatState: (live) => {
 		const result = live as Awaited<ReturnType<typeof unitySessionContext>>;
 		const context = result.context;
@@ -295,12 +366,19 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			// raise the manager gate -- only /unity does that, because calling a
 			// tool is not a delegation.
 			managerMode.markUsed();
+			const workspacePath = resolveToolWorkspace(ctx.cwd, params.workspace);
 			const result = await unityWorkspaceInit({
-				workspacePath: normalizeWorkspacePath(ctx.cwd, params.workspace),
+				workspacePath,
 				template: params.template as "3d" | "blank" | undefined,
 				sourceProject: params.sourceProject,
 				continueExisting: params.continueExisting,
 			});
+			// Adopting or generating a workspace is the moment this session's
+			// workspace becomes known, and it is the only call that knows which
+			// one: every other tool takes the workspace as an argument the caller
+			// has to remember. Remember it here so the per-turn injection stops
+			// describing the session cwd as unmanaged.
+			rememberWorkspace(result.workspacePath);
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -316,7 +394,10 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 			scriptPath: Type.Optional(
 				Type.String({
-					description: "Path to a .cs file. Defaults to the workspace root script.cs when omitted.",
+					description:
+						"Path to a .cs file, e.g. \"modules/<name>/script.cs\". A relative path resolves against the " +
+						"workspace root first, then the session cwd; an absolute path is used as given. Defaults to " +
+						"the workspace root script.cs when omitted.",
 				}),
 			),
 			inlineCode: Type.Optional(
@@ -349,7 +430,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await unityExecuteCSharp({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				scriptPath: params.scriptPath,
 				inlineCode: params.inlineCode,
 				saveAfter: params.saveAfter,
@@ -378,7 +459,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			// raise the manager gate -- only /unity does that, because calling a
 			// tool is not a delegation.
 			managerMode.markUsed();
-			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: params.workspace });
+			const result = await unitySessionContext({ cwd: ctx.cwd, workspace: resolveToolWorkspace(ctx.cwd, params.workspace) });
 			return { content: [{ type: "text", text: formatJsonResult(result) }], details: result };
 		},
 	});
@@ -411,7 +492,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await getSceneInfo({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				categories: params.categories as never,
 				signal,
 			});
@@ -1167,7 +1248,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			// raise the manager gate -- only /unity does that, because calling a
 			// tool is not a delegation.
 			managerMode.markUsed();
-			const workspacePath = normalizeWorkspacePath(ctx.cwd, params.workspace);
+			const workspacePath = resolveToolWorkspace(ctx.cwd, params.workspace);
 			await assertCameraExists(workspacePath, params.cameraName);
 			const result = await unitySaveView({
 				cwd: ctx.cwd,
@@ -1207,7 +1288,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await unityRender({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				outputName: params.outputName,
 				cameraName: params.cameraName,
 				width: params.width,
@@ -1246,7 +1327,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await unityCaptureView({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				outputName: params.outputName,
 				width: params.width,
 				height: params.height,
@@ -1289,7 +1370,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await unityModuleRun({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				moduleName: params.moduleName ?? "default",
 				render: params.render,
 				view: params.view,
@@ -1331,7 +1412,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = await unityModuleRevert({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				moduleName: params.moduleName ?? "default",
 				iteration: params.iteration,
 				force: params.force,
@@ -1392,7 +1473,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			managerMode.markUsed();
 			const result = unityLogCritique({
 				cwd: ctx.cwd,
-				workspace: params.workspace,
+				workspace: resolveToolWorkspace(ctx.cwd, params.workspace),
 				accuracy: params.accuracy,
 				geometry: params.geometry,
 				materials: params.materials,
