@@ -141,11 +141,16 @@ namespace PiUnity
 						result.OpenObject();
 						result.AddString("element", element);
 						result.AddString("component", created.GetType().FullName);
+						// The wrapper the factory returns is NOT a component (see
+						// PiVRFury's header); naming it separately is what lets a
+						// caller see that this VRCFury version models the element as
+						// avatar-level data rather than an editable component field.
+						result.AddString("elementType", PiVRCFury.ElementType(element) ?? "");
 						result.AddString("addedTo", target.name);
 						result.AddString("path", PiVRChat.RelativePath(avatar, target));
 						result.AddString("note",
 							"Set its fields with unity_inspect { gameObject, component: \"" + created.GetType().Name + "\" } "
-							+ "-- the factory only creates the component.");
+							+ "-- the factory only creates the element and its component, it does not set fields.");
 						result.CloseObject();
 						return result.ToString();
 					}

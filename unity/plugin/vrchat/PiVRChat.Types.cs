@@ -42,6 +42,10 @@ namespace PiUnity
 		/// split across ~35 assemblies (com.anatawa12.avatar-optimizer.*,
 		/// nadena.dev.ndmf.*, lilToon.*) whose exact names differ per version, and
 		/// a caller naming the TYPE should not have to know the ASSEMBLY.
+		///
+		/// The simple-name fallback below is deliberately NOT reusable for a
+		/// component lookup: see ComponentsOn/ComponentOn, which re-check the
+		/// resolved type against Component before handing it to Unity.
 		internal static Type Type(string fullName)
 		{
 			if (typeCache.TryGetValue(fullName, out Type cached)) return cached;
@@ -63,6 +67,22 @@ namespace PiUnity
 				}
 			}
 			// Fallback: match on simple name, for a caller that only knows it.
+			//
+			// This converts "not found" into "found something wrong" when the
+			// name it guesses is a real type in a DIFFERENT shape: the caller
+			// asked for com.vrcfury.api.FuryToggle, which moved to
+			// com.vrcfury.api.Components.FuryToggle and became a plain data
+			// object, so the exact lookup misses and this finds the real
+			// FuryToggle -- a class deriving from System.Object, not a
+			// Component. A component lookup then calls GetComponents(type) and
+			// Unity throws "GetComponent requires that the requested component
+			// 'FuryToggle' derives from MonoBehaviour or Component or is an
+			// interface", which took down unity_vrc action=project outright.
+			//
+			// So the fallback is a last resort and every component caller
+			// re-validates. For a caller that only wants "is this package
+			// installed" (Has, StaticMethod, Call) a wrong-but-present type is
+			// harmless: they only read the type's own members.
 			int lastDot = fullName.LastIndexOf('.');
 			string simple = lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
 			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -134,12 +154,32 @@ namespace PiUnity
 			}
 		}
 
+		/// True when a resolved type can actually be found on a GameObject.
+		///
+		/// GetComponents/GetComponent THROW for a type that is not a Component,
+		/// so every component lookup must check this first. A package that
+		/// reorganises its types -- moving a Component into another namespace,
+		/// or turning a component into a plain data object -- then reads as
+		/// "not present" instead of failing the whole request.
+		internal static bool IsComponentType(Type type)
+		{
+			return type != null && typeof(Component).IsAssignableFrom(type);
+		}
+
 		/// Every component of type `typeName` on `root` and its children.
 		internal static List<Component> ComponentsOn(GameObject root, string typeName)
 		{
 			Type type = Type(typeName);
 			var found = new List<Component>();
-			if (type == null || root == null) return found;
+			if (!IsComponentType(type) || root == null)
+			{
+				// null type = the package is absent. A non-Component type = the
+				// name resolved to something else. Both mean "no such component",
+				// which is what this whole directory's contract promises: a
+				// project without the package (or with a different version of
+				// it) is a normal state, not an error.
+				return found;
+			}
 			foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
 			{
 				// GetComponents, not GetComponent: a GameObject can carry several
@@ -157,7 +197,7 @@ namespace PiUnity
 		internal static Component ComponentOn(GameObject root, string typeName)
 		{
 			Type type = Type(typeName);
-			if (type == null || root == null) return null;
+			if (!IsComponentType(type) || root == null) return null;
 			foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
 			{
 				Component component = child.GetComponent(type);
