@@ -8,7 +8,8 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "node test/run-bridge-tests.mjs && node test/engagement-test.mjs && node test/launch-gate.mjs && node test/scene-detection.mjs && node test/module-sequence.test.mjs && node test/doc-consistency.mjs && node test/agent-templates.mjs",
-		"test:plugin": "bash test/compile-plugin.sh"
+		"test:plugin": "bash test/compile-plugin.sh",
+		"test:selftests": "bash test/json-selftest.sh && bash test/roslyn-selftest.sh && bash test/vrcresolve-selftest.sh"
 	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "^0.87.1",
@@ -18,5 +19,8 @@
 	},
 	"peerDependencies": {
 		"pi-manager-core": "*"
+	},
+	"dependencies": {
+		"install": "^0.13.0"
 	}
 }
