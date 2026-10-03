@@ -1011,6 +1011,174 @@ await withEditor(async () => {
 	}
 });
 
+console.log("snippet output: logs, diagnostics, and partial results");
+
+// The reported failure in #4: unity_execute_csharp always came back with
+// stdout:"", because Debug.Log never reaches the Console redirect, and
+// everything the snippet said was lost when the request failed.
+await withEditor(async ({ setControl }) => {
+	const bridge = await jiti.import(join(EXT, "unity", "bridge.js"), { default: false });
+	const execute = await jiti.import(join(EXT, "unity", "execute.js"), { default: false });
+
+	// unityExecuteCSharp insists on a manifest, so the run happens against a
+	// throwaway one. projectPath points at the fake Editor's project.
+	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-snippet-output-"));
+	writeFileSync(
+		join(workspace, "unity-workspace.json"),
+		JSON.stringify({
+			version: 2,
+			id: "snippet-output",
+			projectPath: "/tmp/fake-project",
+			scenePath: "Assets/FakeScene.unity",
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			latestIteration: 1,
+			moduleRuns: [],
+			savedViews: [],
+			renderOutputs: [],
+			adopted: true,
+		}),
+		"utf8",
+	);
+
+	try {
+	// 1. A successful run returns `logs` as an array, even when empty.
+	//    Asserted as an array rather than undefined because the C# always
+	//    writes the key now, and a caller that iterates it must not have to
+	//    guess whether the field is missing or empty.
+	setControl({ failedExecute: null });
+	const okRun = await execute.unityExecuteCSharp({
+		cwd: EXT,
+		workspacePath: workspace,
+		inlineCode: '{"found":3}',
+		saveAfter: false,
+	});
+	check("a successful run returns logs as an array", Array.isArray(okRun.logs), JSON.stringify(okRun.logs));
+	// Optional-chained: the point of the check above is that `logs` may be
+	// missing entirely, so the next one must not crash on that.
+	check("an empty log array stays empty", (okRun.logs?.length ?? -1) === 0, JSON.stringify(okRun.logs));
+	check("stdout still carries the snippet's Console output", okRun.stdout.includes("found"), okRun.stdout);
+
+	// 2. logTail is opt-in AND actually opt-in: the key must not appear at all
+	//    when it was not asked for, because "an empty tail" and "no tail" mean
+	//    different things to a caller deciding whether to ask again.
+	check("no log tail is returned when it was not asked for", okRun.logTail === undefined, JSON.stringify(okRun.logTail));
+
+	const tailed = await execute.unityExecuteCSharp({
+		cwd: EXT,
+		workspacePath: workspace,
+		inlineCode: '{"found":3}',
+		saveAfter: false,
+		logTail: true,
+	});
+	check("a requested log tail comes back", Array.isArray(tailed.logTail) && tailed.logTail.length === 2, JSON.stringify(tailed.logTail));
+	check("the tail says how many lines it returned", tailed.logTailLines === 2, String(tailed.logTailLines));
+
+	// 3. A snippet that threw: the failure envelope now carries the payload.
+	//    This is the heart of the fix -- the C# writes ok:false WITH a result,
+	//    and bridge.ts used to drop that result on the floor.
+	setControl({
+		failedExecute: {
+			message: "C# snippet threw: System.NullReferenceException: Object reference not set",
+			result: {
+				stdout: "collected 12 findings\n--- Debug.Log ---\n[Warning] lilToon: shader missing",
+				stderr: "C# snippet threw: System.NullReferenceException: Object reference not set",
+				exitCode: 1,
+				changed: true,
+				label: "execute:probe",
+				stackTrace: "   at Probe.Run() in Assets/Editor/Probe.cs:line 42",
+				logs: [{ level: "Warning", message: "lilToon: shader missing", stack: "" }],
+			},
+		},
+	});
+	let thrown = "";
+	try {
+		await execute.unityExecuteCSharp({ cwd: EXT, workspacePath: workspace, inlineCode: "throw", saveAfter: false });
+	} catch (error) {
+		thrown = error instanceof Error ? error.message : String(error);
+	}
+
+	// The message keeps the bridge's own wording first, so anything that read
+	// error.message before keeps working.
+	check("a thrown snippet surfaces its own message", thrown.includes("NullReferenceException"), thrown.slice(0, 200));
+	// ...and the payload that used to be discarded is now IN the message, so a
+	// caller reading only the tool result can see it.
+	check("the stack trace reaches the caller", thrown.includes("Probe.cs:line 42"), thrown.slice(0, 400));
+	check(
+		"the Debug.Log lines reach the caller",
+		thrown.includes("[Warning] lilToon: shader missing"),
+		thrown.slice(0, 400),
+	);
+	check(
+		"the output printed before the throw reaches the caller",
+		thrown.includes("collected 12 findings"),
+		thrown.slice(0, 400),
+	);
+	check("the caller is told nothing was saved", thrown.includes("Nothing was saved."), thrown.slice(-200));
+
+	// 4. A snippet that did not compile: Roslyn's diagnostics verbatim.
+	//
+	// Asserted to include the file:line:col, because the value of a diagnostic is
+	// the location -- and unity/plugin/PiUnityBridge.Compiler.cs already spends a
+	// helper (StripImplicitUsingOffset) correcting the line number so it matches
+	// the caller's own file. Losing that work to a reformat would be invisible.
+	setControl({
+		failedExecute: {
+			message: "C# snippet failed to compile:\nPiSnippet.cs(12,19): error CS0103",
+			result: {
+				stdout: "",
+				stderr: "C# snippet failed to compile:\nPiSnippet.cs(12,19): error CS0103",
+				exitCode: 1,
+				changed: false,
+				diagnostics: ["PiSnippet.cs(12,19): error CS0103: The name 'foo' does not exist in the current context"],
+				logs: [],
+			},
+		},
+	});
+	let compileThrown = "";
+	try {
+		await execute.unityExecuteCSharp({ cwd: EXT, workspacePath: workspace, inlineCode: "nonsense", saveAfter: false });
+	} catch (error) {
+		compileThrown = error instanceof Error ? error.message : String(error);
+	}
+	check("compile diagnostics reach the caller verbatim", compileThrown.includes("(12,19): error CS0103"), compileThrown.slice(0, 300));
+	check(
+		"compile diagnostics are labelled, not bare",
+		compileThrown.includes("--- compiler diagnostics ---"),
+		compileThrown.slice(0, 300),
+	);
+	// A snippet that never compiled changed nothing, so nothing may be saved.
+	check("a failed compile is reported as not saved", compileThrown.includes("Nothing was saved."), compileThrown.slice(-200));
+
+	// 5. A failure WITHOUT a payload must NOT become a partial-result error.
+	//    unity_bridge_status, open-scene and friends still reply ok:false with
+	//    only an error string; pretending they carry a payload would attach an
+	//    empty object to every one of them.
+	setControl({ failedExecute: null });
+	await sleep(1_100);
+	setControl({ sceneDirty: true });
+	await sleep(1_100);
+	let bare = "";
+	try {
+		await bridge.requestLiveUnityBridge({ payload: { type: "open-scene", scenePath: "Assets/Other.unity" }, timeoutMs: 5_000 });
+	} catch (error) {
+		bare = error;
+	}
+	// Read off the error's own class name rather than instanceof-ing the
+	// exported class: when the fix is absent the class does not exist, and
+	// `x instanceof undefined` is a TypeError that would abort the run instead
+	// of reporting the failure this check exists to catch.
+	check(
+		"a payload-free failure is a plain Error",
+		bare instanceof Error && bare?.constructor?.name !== "UnityBridgeFailureError",
+		bare?.constructor?.name,
+	);
+	check("its message is still the Editor's own", String(bare?.message).includes("unsaved changes"), String(bare?.message));
+	} finally {
+		rmSync(workspace, { recursive: true, force: true });
+	}
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {
 	for (const failure of failures) console.log(`  - ${failure}`);

@@ -23,6 +23,13 @@ export {
 	type ExecuteCSharpResult,
 } from "./execute.js";
 
+// The bridge's typed failure, re-exported so a caller of unityExecuteCSharp can
+// tell "the snippet failed but told me why at length" apart from a transport
+// error. unity/execute.ts folds its payload into the thrown message, so nothing
+// in-tree needs the class itself today; it is exported for embedders (and for
+// tests asserting the distinction).
+export { UnityBridgeFailureError } from "./bridge.js";
+
 export { unityCaptureView, unityRender, type CaptureViewOptions, type RenderOptions } from "./render.js";
 export { assertCameraExists, unitySaveView, unitySetTool, type SetToolOptions } from "./save-view.js";
 export {

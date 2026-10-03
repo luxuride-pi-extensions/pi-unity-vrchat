@@ -84,6 +84,31 @@ rig.
 4. `unity_log_critique` with concrete issues.
 5. Repeat up to 5 times, then stop and report.
 
+### Reading a snippet's output
+
+A snippet's output comes back three ways, and which one you get depends on how
+it reported — not on how you called it:
+
+- `stdout` — `Console.WriteLine`, plus any `Debug.Log` folded in after a
+  `--- Debug.Log ---` marker.
+- `logs: [{level, message, stack}]` — every `Debug.Log` the snippet emitted,
+  in order, with Unity's own level names (`Log`, `Warning`, `Error`,
+  `Assert`, `Exception`). **Prefer this** when you are reading a result rather
+  than scraping text: it is structured, and it carries the stack trace.
+- `stdout`/`stderr` are also populated when the snippet *fails*. A snippet that
+  logs each object it inspects and then throws has already produced the
+  diagnosis, so the message you get back contains its `Debug.Log` lines, its
+  stack trace, and its Roslyn diagnostics if it did not compile. Nothing is
+  saved in that case.
+
+So the "no output" case is a real one: a script that logs nothing and returns
+nothing reports empty `stdout` *and* an empty `logs`. Print something.
+
+Pass `logTail: true` to also get the last 80 lines of the **Editor** log. That
+is for output pi did not generate — a package reacting to what your snippet
+created. It also carries unrelated Editor noise from before the run, which is
+why it is opt-in.
+
 ## Checkpoints
 
 For a risky change, `saveBefore: true` copies the scene file to

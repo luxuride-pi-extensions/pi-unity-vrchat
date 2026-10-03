@@ -45,6 +45,69 @@ using System.Text.RegularExpressions;
 
 namespace PiUnity
 {
+	// ---- Types shared with the compiler -------------------------------------
+	//
+	// These three live here, at namespace level, rather than nested in Bridge,
+	// for one reason: test/roslyn-selftest.cs compiles SnippetCompiler.cs on its
+	// OWN, with no Bridge partial to satisfy. Nested types would leave that
+	// harness unable to compile -- and it exists precisely so the compiler
+	// plumbing can be tested with no Editor open. All three are Unity-free,
+	// which is what this file is for.
+
+	/// A Debug.Log line captured while a snippet was running.
+	///
+	/// `level` is Unity's own LogType name, so it reads exactly like the Editor
+	/// console: "Log", "Warning", "Error", "Assert", "Exception".
+	///
+	/// public because SnippetException exposes it as a field, and a public field
+	/// cannot have a less accessible type (CS0052). Nothing outside the plugin
+	/// constructs one; it is only ever read off the exception.
+	public sealed class CapturedLog
+	{
+		internal readonly string level;
+		internal readonly string message;
+		internal readonly string stack;
+
+		internal CapturedLog(string level, string message, string stack)
+		{
+			this.level = level;
+			this.message = message;
+			this.stack = stack;
+		}
+	}
+
+	/// A snippet did not compile. The diagnostics travel as data rather than as
+	/// part of the message, because a model reading `diagnostics` gets the file,
+	/// line, column and error code as fields; one parsing "C# snippet failed to
+	/// compile:\n..." has to strip a prefix first and can get it wrong.
+	public sealed class CompileDiagnosticsException : Exception
+	{
+		public readonly List<string> diagnostics;
+
+		internal CompileDiagnosticsException(List<string> diagnostics)
+			: base("C# snippet failed to compile:\n" + string.Join("\n", diagnostics.ToArray()))
+		{
+			this.diagnostics = diagnostics;
+		}
+	}
+
+	/// A snippet threw. The captured Debug.Log lines travel with the exception
+	/// rather than being dropped, because they are frequently the actual answer:
+	/// a snippet that logs each object it inspects and then hits a null reference
+	/// has already produced the diagnosis.
+	public sealed class SnippetException : Exception
+	{
+		public readonly List<CapturedLog> logs;
+		public readonly string output;
+
+		internal SnippetException(string message, Exception cause, List<CapturedLog> logs, string output)
+			: base(message, cause)
+		{
+			this.logs = logs;
+			this.output = output;
+		}
+	}
+
 	/// Compiles a C# snippet to an in-memory assembly using whichever Roslyn the
 	/// host provides. Deliberately free of any UnityEditor/UnityEngine reference
 	/// so it is testable without an Editor.
@@ -431,7 +494,11 @@ namespace PiUnity
 			List<string> errors = CollectErrors(InvokeNamed(compilation, "GetDiagnostics", new Dictionary<string, object>()));
 			if (errors.Count > 0)
 			{
-				throw new Exception("C# snippet failed to compile:\n" + string.Join("\n", errors.ToArray()));
+				// Typed, not a bare Exception: the dispatcher reads the diagnostics
+				// list off it to answer `diagnostics` in the error response, and
+				// re-parsing the message text to get them back is exactly the
+				// fragility that made the old response hard to act on.
+				throw new CompileDiagnosticsException(errors);
 			}
 
 			return EmitAndLoad(compilation, assemblyName);
@@ -452,10 +519,8 @@ namespace PiUnity
 				if (!success)
 				{
 					List<string> errors = CollectErrors(result.GetType().GetProperty("Diagnostics").GetValue(result, null));
-					throw new Exception(
-						"C# snippet emitted no assembly" +
-						(errors.Count > 0 ? ":\n" + string.Join("\n", errors.ToArray()) : ".")
-					);
+					if (errors.Count > 0) throw new CompileDiagnosticsException(errors);
+					throw new Exception("C# snippet emitted no assembly, and Roslyn reported no diagnostics for it.");
 				}
 
 				return Assembly.Load(stream.ToArray());

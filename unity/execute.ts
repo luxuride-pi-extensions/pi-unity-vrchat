@@ -10,7 +10,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
-import { requestLiveUnityExecuteCSharp, requestLiveUnitySceneInfo } from "./bridge.js";
+import { UnityBridgeFailureError, requestLiveUnityExecuteCSharp, requestLiveUnitySceneInfo } from "./bridge.js";
 import {
 	ensureWorkspaceScriptExists,
 	fileExists,
@@ -21,6 +21,7 @@ import {
 import {
 	UNITY_SCENE_INFO_CATEGORIES,
 	UNITY_SCENE_INFO_DEFAULT_CATEGORIES,
+	type UnityExecuteLogEntry,
 	type UnitySceneInfo,
 	type UnitySceneInfoCategory,
 } from "./types.js";
@@ -34,6 +35,7 @@ export interface ExecuteCSharpOptions {
 	saveAfter?: boolean;
 	timeoutSeconds?: number;
 	saveBefore?: boolean;
+	logTail?: boolean;
 	signal?: AbortSignal;
 }
 
@@ -47,6 +49,15 @@ export interface ExecuteCSharpResult {
 	saved: boolean;
 	sourcePath: string;
 	checkpointPath?: string;
+	/** Debug.Log lines the snippet emitted. Also folded into `stdout` for older callers. */
+	logs?: UnityExecuteLogEntry[];
+	/** Roslyn diagnostics, when the snippet failed to compile. */
+	diagnostics?: string[];
+	/** The snippet's own stack trace, when it threw. */
+	stackTrace?: string;
+	/** Present only when logTail was requested. */
+	logTail?: string[];
+	logTailLines?: number;
 }
 
 /**
@@ -110,6 +121,53 @@ const SAVE_SCENE_SNIPPET = [
 	"}",
 ].join("\n");
 
+/// Raises an error that carries the snippet's output, for the paths where the
+/// bridge returned a payload alongside its failure.
+///
+/// Without this the throw from `requestLiveUnityExecuteCSharp` reaches the tool
+/// caller as a bare message: a snippet that threw keeps its Debug.Log lines, its
+/// stack trace and its exit code on `partialResult`, and all of it is dropped
+/// unless someone reads the error object. That is exactly the reported failure --
+/// `stdout` always `""` -- reproduced on the error path.
+///
+/// The message is kept as the exception's own, so nothing that used to read
+/// `error.message` sees a change; only callers that knew to look for the payload
+/// are affected.
+function throwWithSnippetOutput(error: unknown, what: string): never {
+	if (!(error instanceof UnityBridgeFailureError)) throw error;
+	const partial = error.partialResult as Partial<ExecuteCSharpResult> & {
+		diagnostics?: string[];
+		stackTrace?: string;
+	};
+	const parts: string[] = [error.message];
+
+	if (partial.diagnostics?.length) {
+		// Roslyn's own text, verbatim and unedited. Reformatting a compiler
+		// diagnostic loses the file:line:col that makes it actionable, and this is
+		// the first time a caller sees one through the bridge at all.
+		parts.push("", "--- compiler diagnostics ---", ...partial.diagnostics);
+	}
+	if (partial.stackTrace) {
+		parts.push("", "--- stack trace ---", partial.stackTrace);
+	}
+	if (partial.stdout?.trim()) {
+		parts.push("", "--- output before the throw ---", partial.stdout.trim());
+	}
+	if (partial.logs?.length) {
+		parts.push(
+			"",
+			`--- ${partial.logs.length} Debug.Log line(s) ---`,
+			...partial.logs.map((entry) => `[${entry.level}] ${entry.message}`),
+		);
+	}
+	if (partial.logTail?.length) {
+		parts.push("", "--- editor log tail ---", ...partial.logTail);
+	}
+	parts.push("", `${what} Nothing was saved.`);
+
+	throw new Error(parts.join("\n"), { cause: error });
+}
+
 export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise<ExecuteCSharpResult> {
 	const workspacePath = options.workspacePath ?? resolve(options.cwd, options.workspace ?? ".");
 	const manifest = loadWorkspaceManifest(workspacePath);
@@ -158,13 +216,19 @@ export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise
 		}
 	}
 
-	const result = await requestLiveUnityExecuteCSharp({
-		code,
-		saveAfter: options.saveAfter ?? true,
-		label: `execute:${sourcePath}`,
-		timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
-		launchProjectPath: manifest.projectPath,
-	});
+	let result: import("./types.js").UnityExecuteResult;
+	try {
+		result = await requestLiveUnityExecuteCSharp({
+			code,
+			saveAfter: options.saveAfter ?? true,
+			label: `execute:${sourcePath}`,
+			logTail: options.logTail,
+			timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
+			launchProjectPath: manifest.projectPath,
+		});
+	} catch (error) {
+		throwWithSnippetOutput(error, "The snippet did not complete.");
+	}
 
 	return {
 		workspacePath,
@@ -176,6 +240,11 @@ export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise
 		saved: options.saveAfter ?? true,
 		sourcePath,
 		checkpointPath,
+		logs: result.logs,
+		diagnostics: result.diagnostics,
+		stackTrace: result.stackTrace,
+		logTail: result.logTail,
+		logTailLines: result.logTailLines,
 	};
 }
 
