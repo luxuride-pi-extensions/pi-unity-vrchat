@@ -326,8 +326,16 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			),
 			saveAfter: Type.Optional(
 				Type.Boolean({
-					description: "Save the open scene after the code runs successfully.",
+					description:
+						"Save the open scene after the code runs. Defaults to true, which SUCCEEDING runs save unconditionally -- it does not diff the scene, so a read-only probe reports saved:true. Pass false when a script might only inspect, or when you want to decide after seeing its output.",
 					default: true,
+				}),
+			),
+			logTail: Type.Optional(
+				Type.Boolean({
+					description:
+						"Also return the last 80 lines of the Unity Editor log. Use when Debug.Log output is not enough, e.g. a package reacting to something the snippet created. Off by default: the Editor log also carries unrelated noise from before the snippet ran.",
+					default: false,
 				}),
 			),
 			saveBefore: Type.Optional(
@@ -354,6 +362,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 				inlineCode: params.inlineCode,
 				saveAfter: params.saveAfter,
 				saveBefore: params.saveBefore,
+				logTail: params.logTail,
 				timeoutSeconds: params.timeoutSeconds,
 				signal,
 			});

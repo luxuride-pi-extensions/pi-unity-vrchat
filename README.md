@@ -206,7 +206,7 @@ build that skipped your code.
 | Tool | Does |
 | --- | --- |
 | `unity_workspace_init` | Create a generated project, or **adopt an existing project in place**. Opens it in the Editor. |
-| `unity_execute_csharp` | Run C# in the live Editor from `script.cs` or inline. `saveBefore` / `saveAfter`. |
+| `unity_execute_csharp` | Run C# in the live Editor from `script.cs` or inline. `saveBefore` / `saveAfter`, `logTail`. Returns `logs: [{level, message, stack}]` for anything the snippet `Debug.Log`ged, plus `diagnostics` and `stackTrace` when it fails. |
 | `unity_session_context` | Live state: open scene, selection, active transform tool, viewport. |
 | `unity_scene_info` | Structured read-only inspection by category. Objects carry world + local position, rotation, and scale. |
 | `unity_bones` | Where a **bone** is. `humanoidBones` by `HumanBodyBones` name, plus the full rig by transform path. |

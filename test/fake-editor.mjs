@@ -89,6 +89,17 @@ const state = {
 	 * timestamp-based proxy keeps calling it uncompiled.
 	 */
 	compileStatusStale: false,
+	/**
+	 * Make execute-csharp behave as a snippet that threw: an ok:false reply that
+	 * still carries the payload the real plugin now sends (WritePartialResponse).
+	 * Null = the normal success path.
+	 *
+	 * Modelled as a VALUE rather than an exception, because the real plugin does
+	 * not fail the request by throwing out of the dispatcher -- it catches, builds
+	 * a result object and writes ok:false WITH a result. A double that threw here
+	 * would exercise the old path and make every assertion below vacuous.
+	 */
+	failedExecute: null,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -148,12 +159,26 @@ const HANDLERS = {
 
 	// stdout is what the binder parses for the export summary, so mirror the
 	// real bridge's shape: whatever the caller sent comes back as stdout.
-	"execute-csharp": (request) => ({
-		stdout: request.code ?? "",
-		stderr: "",
-		exitCode: 0,
-		changed: true,
-	}),
+	// `logs` is present because the real plugin always returns it now, and a
+	// double that omitted it would let a caller pass while reading undefined.
+	"execute-csharp": (request) => {
+		if (state.failedExecute) {
+			const error = new Error(state.failedExecute.message);
+			// WritePartialResponse: ok:false AND a result. Thrown from here so
+			// the bridge's own envelope-building is what runs.
+			error.result = state.failedExecute.result;
+			throw error;
+		}
+		return {
+			stdout: request.code ?? "",
+			stderr: "",
+			exitCode: 0,
+			changed: true,
+			label: request.label ?? "",
+			logs: [],
+			...(request.logTail ? { logTail: ["editor line 1", "editor line 2"], logTailLines: 2 } : {}),
+		};
+	},
 
 	"open-scene": (request) => {
 		if (state.sceneDirty) {
@@ -418,7 +443,15 @@ async function loop() {
 				try {
 					body = { ok: true, result: handler(request) };
 				} catch (error) {
-					body = { ok: false, error: String(error?.message ?? error) };
+					// WritePartialResponse: ok:false WITH a result when the handler
+					// supplied one. The real plugin only does this for two known
+					// failure kinds, and it always sets `result` -- so a throw
+					// carrying `.result` is how this double models one. Anything
+					// else stays a bare ok:false, which is what every unrelated
+					// failure still looks like.
+					body = error?.result
+						? { ok: false, error: String(error?.message ?? error), result: error.result }
+						: { ok: false, error: String(error?.message ?? error) };
 				}
 			}
 

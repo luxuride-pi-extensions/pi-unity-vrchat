@@ -77,10 +77,68 @@ namespace PiUnity
 					}
 					catch (Exception error)
 					{
-						errorMessage = error.Message;
+						// A snippet that threw has usually already said the useful
+						// thing through Debug.Log, and that is thrown away with the
+						// stack frame that carried it unless the dispatcher keeps it.
+						// So the two failure kinds are recognised by TYPE here
+						// rather than by matching message text.
+						//
+						// This is a catch of a deliberately-thrown exception type, not
+						// of every Exception: any other failure keeps the plain
+						// message, because inventing a `logs` key for an unrelated
+						// bug (a missing file, a bad request) would be a lie about
+						// where the answer is.
+						var thrown = error as SnippetException;
+						if (thrown != null)
+						{
+							Json partial = new Json();
+							partial.OpenObject();
+							partial.AddString("stdout", thrown.output ?? "");
+							partial.AddString("stderr", thrown.Message ?? "");
+							partial.AddNumber("exitCode", 1);
+							partial.AddBool("changed", true);
+							// The full stack trace, from the snippet's own frames
+							// down. TargetInvocationException is unwrapped in
+							// CompileAndRun, so the top frame is the snippet's, not
+							// a reflection frame that means nothing to a caller.
+							partial.AddString("stackTrace", thrown.InnerException != null ? thrown.InnerException.StackTrace ?? "" : thrown.StackTrace ?? "");
+							Bridge.WriteLogArray(partial, "logs", thrown.logs);
+							partial.CloseObject();
+							resultJson = partial.ToString();
+							errorMessage = thrown.Message;
+						}
+						else
+						{
+							errorMessage = error.Message;
+							var compile = error as CompileDiagnosticsException;
+							if (compile != null)
+							{
+								Json partial = new Json();
+								partial.OpenObject();
+								partial.AddString("stdout", "");
+								partial.AddString("stderr", compile.Message ?? "");
+								partial.AddNumber("exitCode", 1);
+								partial.AddBool("changed", false);
+								partial.AddString("stackTrace", "");
+								partial.AddArray("diagnostics", compile.diagnostics.ToArray());
+								partial.AddArray("logs", new string[0]);
+								partial.CloseObject();
+								resultJson = partial.ToString();
+							}
+						}
 					}
 
-					if (resultJson != null) WriteResponse(requestId, true, null, resultJson);
+					if (resultJson != null && errorMessage != null)
+					{
+						// Both are set only for the failures above, which have both a
+						// human message and a structured payload to put in front of
+						// it. ok:false with a result keeps the error visible in the
+						// normal place while still delivering what the snippet
+						// learned -- previously this was an either/or, so a caller
+						// either got the exception or got the logs, never both.
+						WritePartialResponse(requestId, errorMessage, resultJson);
+					}
+					else if (resultJson != null) WriteResponse(requestId, true, null, resultJson);
 					else WriteResponse(requestId, false, errorMessage ?? "Request handler returned nothing.", null);
 				}
 			}
@@ -172,6 +230,30 @@ namespace PiUnity
 			{
 				// Rename-over is not supported on every filesystem we might land
 				// on, so fall back to a direct write rather than losing the reply.
+				try { File.WriteAllText(target, payload); } catch (Exception) { }
+			}
+		}
+
+		/// A failure reply that still carries the payload.
+		///
+		/// The same atomic publish as WriteResponse, factored out rather than
+		/// duplicated because the two differ only in the envelope -- and the
+		/// difference has to be exact: a caller reads `error` to decide it failed
+		/// and `result` to find out what the snippet managed to say, and getting
+		/// the shape wrong in either direction loses one of those.
+		private static void WritePartialResponse(string requestId, string error, string resultJson)
+		{
+			string payload = "{\"ok\":false,\"error\":" + Json.Quote(error) + ",\"result\":" + (resultJson ?? "null") + "}";
+			string target = Path.Combine(ResponsesDir, requestId + ".json");
+			string temp = target + ".tmp";
+			try
+			{
+				File.WriteAllText(temp, payload);
+				if (File.Exists(target)) File.Delete(target);
+				File.Move(temp, target);
+			}
+			catch (Exception)
+			{
 				try { File.WriteAllText(target, payload); } catch (Exception) { }
 			}
 		}

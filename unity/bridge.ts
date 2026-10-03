@@ -56,6 +56,24 @@ export interface LiveBridgeRequestOptions {
 	launchProjectPath?: string;
 }
 
+/**
+ * A bridge request that failed but still returned a payload.
+ *
+ * `partialResult` is whatever the Editor managed to produce: for
+ * unity_execute_csharp that is `stdout`, `stderr`, `stackTrace`, `logs` and
+ * `diagnostics`. Callers read it off the error rather than having it
+ * stringified into a message.
+ */
+export class UnityBridgeFailureError<T = unknown> extends Error {
+	readonly partialResult: T;
+
+	constructor(message: string, partialResult: T) {
+		super(message);
+		this.name = "UnityBridgeFailureError";
+		this.partialResult = partialResult;
+	}
+}
+
 export async function requestLiveUnityBridge<T>(options: LiveBridgeRequestOptions): Promise<T> {
 	const { requestsDir, responsesDir } = getLiveBridgePaths();
 	mkdirSync(requestsDir, { recursive: true });
@@ -110,6 +128,18 @@ async function runLockedBridgeRequest<T>(options: LiveBridgeRequestOptions): Pro
 				);
 			}
 			if (parsed.ok) return parsed.result as T;
+			// A failure may still carry a payload: a snippet that threw, or one
+			// that did not compile, has usually learned something worth returning
+			// (the Debug.Log lines it emitted, the Roslyn diagnostics, the stack
+			// trace). Discarding `result` here threw that away and the caller
+			// re-ran the snippet to get output it had already paid for.
+			//
+			// Rethrown as a typed error carrying `partialResult`, NOT folded into
+			// the message: a caller that wants the logs needs them as fields, and
+			// pasting a JSON blob into an error string is how they get lost again.
+			if (parsed.result !== undefined && parsed.result !== null) {
+				throw new UnityBridgeFailureError(parsed.error ?? "Live Unity bridge request failed.", parsed.result as T);
+			}
 			throw new Error(parsed.error ?? "Live Unity bridge request failed.");
 		}
 		await delay(LIVE_BRIDGE_POLL_MS, options.signal);
@@ -325,6 +355,8 @@ export const requestLiveUnityExecuteCSharp = (options: {
 	saveAfter: boolean;
 	label: string;
 	saveBeforeScenePath?: string;
+	/** Include the tail of the Editor log. Off unless asked: it also carries package noise from before the snippet ran. */
+	logTail?: boolean;
 	timeoutMs?: number;
 	launchProjectPath?: string;
 }) =>
@@ -336,6 +368,7 @@ export const requestLiveUnityExecuteCSharp = (options: {
 			code: options.code,
 			saveAfter: options.saveAfter,
 			label: options.label,
+			logTail: options.logTail === true,
 		},
 	});
 

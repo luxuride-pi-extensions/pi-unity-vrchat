@@ -18,12 +18,35 @@ export interface UnityBridgeResponse<T> {
 	error?: string;
 }
 
+/**
+ * One Debug.Log line the Editor emitted while a snippet ran.
+ *
+ * `level` is Unity's own LogType name -- "Log", "Warning", "Error", "Assert",
+ * "Exception" -- so it reads exactly like the Editor console.
+ */
+export interface UnityExecuteLogEntry {
+	level: string;
+	message: string;
+	/** Present for Error/Exception/Assert; empty for a plain Debug.Log. */
+	stack?: string;
+}
+
 export interface UnityExecuteResult {
 	stdout: string;
 	stderr: string;
 	exitCode: number;
 	changed: boolean;
 	label: string;
+	/** Debug.Log lines captured during the snippet, in order. */
+	logs?: UnityExecuteLogEntry[];
+	/** Roslyn diagnostics, when the snippet failed to compile. */
+	diagnostics?: string[];
+	/** The snippet's own stack trace, when it threw. */
+	stackTrace?: string;
+	/** Present only when logTail was requested: the Editor log's last lines. */
+	logTail?: string[];
+	/** How many lines logTail actually returned; less than requested if the log is short or unreadable. */
+	logTailLines?: number;
 }
 
 export interface UnitySessionContext {

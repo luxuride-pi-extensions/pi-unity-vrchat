@@ -84,13 +84,24 @@ namespace PiUnity
 			}
 		}
 
+		/// How many Editor log lines `logTail: true` returns. Enough to show a
+		/// package's complaint about the snippet's new object, small enough that
+		/// it cannot dominate the response.
+		private const int LOG_TAIL_LINES = 80;
+
 		private static string HandleExecuteCSharp(Json request)
 		{
 			string code = request.GetString("code");
 			bool saveAfter = request.GetBool("saveAfter");
 			string label = request.GetString("label");
+			// Opt-in, because the tail is the Editor log and the Editor log also
+			// carries package noise from before this snippet ran. Off by default:
+			// a caller who asked for their snippet's output should not receive
+			// 200 lines of someone else's warning as well.
+			bool logTail = request.GetBool("logTail");
 
-			string log = CompileAndRun(code);
+			List<CapturedLog> logs;
+			string log = CompileAndRun(code, out logs);
 			if (saveAfter) SaveScenes();
 
 			Json result = new Json();
@@ -100,8 +111,49 @@ namespace PiUnity
 			result.AddNumber("exitCode", 0);
 			result.AddBool("changed", true);
 			result.AddString("label", label ?? "");
+			WriteLogArray(result, "logs", logs);
+			if (logTail)
+			{
+				string[] tail = RecentEditorLogLines(LOG_TAIL_LINES);
+				result.AddNumber("logTailLines", tail.Length);
+				result.AddArray("logTail", tail);
+			}
 			result.CloseObject();
 			return result.ToString();
+		}
+
+		/// The last few lines of the Editor log, for the case where the output a
+		/// caller wants is not the snippet's own.
+		///
+		/// Read from the same file GetLog() reports, on the same tail-only
+		/// reasoning: it is append-only for the whole Editor lifetime, so
+		/// anything older is not about this run.
+		private static string[] RecentEditorLogLines(int count)
+		{
+			string path = FindEditorLogPath();
+			if (path == null || !File.Exists(path)) return new string[0];
+			try
+			{
+				const int tailBytes = 64 * 1024;
+				using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+				{
+					long start = Math.Max(0, stream.Length - tailBytes);
+					stream.Seek(start, SeekOrigin.Begin);
+					byte[] buffer = new byte[stream.Length - start];
+					int read = stream.Read(buffer, 0, buffer.Length);
+					string text = new System.Text.UTF8Encoding(false).GetString(buffer, 0, read);
+					string[] lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+					if (lines.Length <= count) return lines;
+					string[] window = new string[count];
+					Array.Copy(lines, lines.Length - count, window, 0, count);
+					return window;
+				}
+			}
+			catch (Exception)
+			{
+				// A log we cannot read is not a failed snippet; say nothing.
+				return new string[0];
+			}
 		}
 	}
 }

@@ -45,6 +45,10 @@ export interface ModuleRunResult {
 	scenePath: string;
 	renderPath?: string;
 	viewAdequacy: string;
+	/** Set when the run completed but logged something the caller should know about. */
+	warning?: string;
+	/** Debug.Log lines the module emitted, so a caller can read them without opening Unity. */
+	logs?: import("./types.js").UnityExecuteLogEntry[];
 }
 
 function getModuleDir(workspacePath: string, moduleName: string): string {
@@ -181,12 +185,25 @@ export async function unityModuleRun(options: ModuleRunOptions): Promise<ModuleR
 			launchProjectPath: manifest.projectPath,
 		});
 
+		let runWarning: string | undefined;
+
 		if (result.exitCode !== 0) {
 			throw new Error(
 				`Module "${moduleName}" failed (exit code ${result.exitCode}). The scene was NOT saved, this run was NOT ` +
 					`recorded in moduleRuns, and there is nothing to revert. Script that ran: ${runScriptPath}. ` +
 					`Output: ${result.stdout.trim() || "(none)"}`,
 			);
+		}
+		if (result.stackTrace) {
+			// A completed snippet that logged a stack trace logged it on purpose:
+			// something inside the Editor or a package threw and the run recovered.
+			// Unity does not turn that into a non-zero exit, so without this the
+			// trace is dropped even though it is the most informative line in the
+			// run. Reported as a warning rather than a failure, because the run
+			// itself did complete -- unlike the case above, where nothing was saved.
+			runWarning =
+				`Module "${moduleName}" logged ${result.stackTrace.split(/\r?\n/).filter(Boolean).length} line(s) of stack trace ` +
+				`while completing. The run saved normally; inspect the run's output if this was not expected.`;
 		}
 
 		let renderPath: string | undefined;
@@ -232,6 +249,8 @@ export async function unityModuleRun(options: ModuleRunOptions): Promise<ModuleR
 			scenePath: manifest.scenePath,
 			renderPath,
 			viewAdequacy,
+			warning: runWarning,
+			logs: result.logs,
 		};
 	} catch (error) {
 		// Hand the iteration back so a failed attempt does not leave a gap that
