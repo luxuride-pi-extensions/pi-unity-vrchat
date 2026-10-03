@@ -217,6 +217,38 @@ namespace PiUnity
 			string payload = ok
 				? "{\"ok\":true,\"result\":" + (resultJson ?? "null") + "}"
 				: "{\"ok\":false,\"error\":" + Json.Quote(error) + "}";
+			// Self-check before publishing.
+			//
+			// The Json writer emits whatever it is told to, so a call site that
+			// writes an unkeyed value where a pair belongs produces a
+			// syntactically invalid payload that no exception catches: the
+			// response is written, the bridge reports ok:true, and the caller
+			// fails later at JSON.parse with only an offset into a single-line
+			// payload. unity_scene_info on a project with shader-graph materials
+			// did exactly that -- "Expected double-quoted property name in JSON at
+			// position 49883" on a ~50KB one-line scene dump, which names neither
+			// the offending field nor the request.
+			//
+			// So a payload that does not parse is turned into an error response
+			// that says which request failed, how long the payload was, and where
+			// the parse stopped. The underlying bug still has to be fixed in the
+			// writer call site, but it is now reported as a bridge failure at the
+			// moment it happens instead of as a corrupt read on the other side.
+			if (ok)
+			{
+				try
+				{
+					Json.Parse(payload);
+				}
+				catch (Exception parseError)
+				{
+					payload = "{\"ok\":false,\"error\":" + Json.Quote(
+						"The bridge produced a malformed response for request '" + requestId + "' ("
+						+ (resultJson ?? "").Length + " chars of result): "
+						+ parseError.Message)
+						+ "}";
+				}
+			}
 			string target = Path.Combine(ResponsesDir, requestId + ".json");
 			string temp = target + ".tmp";
 			try

@@ -123,8 +123,21 @@ async function runLockedBridgeRequest<T>(options: LiveBridgeRequestOptions): Pro
 			try {
 				parsed = JSON.parse(raw) as typeof parsed;
 			} catch (error) {
+				// Name the request and the size. A single-line payload means
+				// JSON.parse's offset is meaningless on its own: "Expected
+				// double-quoted property name in JSON at position 49883" of a
+				// 50KB scene dump says neither which request failed nor that the
+				// payload was near a whole scene's worth of objects. The bridge
+				// self-checks payloads before publishing them (see
+				// WriteResponse in PiUnityBridge.Polling.cs), so reaching this
+				// branch at all means the response was already malformed
+				// upstream -- or the file was read mid-write.
+				const label = options.payload.label || String(options.payload.type ?? "unknown");
 				throw new Error(
-					`The Unity bridge wrote an unreadable response: ${error instanceof Error ? error.message : String(error)}`,
+					`The Unity bridge wrote an unreadable response for request '${label}' ` +
+						`(${raw.length} bytes on disk): ${error instanceof Error ? error.message : String(error)}. ` +
+						`Narrow the request (fewer categories, a filtered query) to get a readable payload; ` +
+						`check unity_bridge_status for the plugin compile state.`,
 				);
 			}
 			if (parsed.ok) return parsed.result as T;

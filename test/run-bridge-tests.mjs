@@ -11,9 +11,9 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +49,6 @@ async function withEditor(fn) {
 	const bridgeDir = join(dir, "bridge");
 	for (const sub of ["requests", "responses"]) {
 		// The TS side creates these itself, but the double reads at startup.
-		const { mkdirSync } = await import("node:fs");
 		mkdirSync(join(bridgeDir, sub), { recursive: true });
 	}
 	writeFileSync(join(bridgeDir, "control.json"), "{}");
@@ -816,6 +815,200 @@ await withEditor(async ({ bridgeDir }) => {
 	await sleep(50);
 	const cleared = await status.unityBridgeStatus({ isAlive: () => true });
 	check("removing the lock clears busy", cleared.busy === false, JSON.stringify(cleared.lock));
+});
+
+console.log("execute csharp: script path resolution");
+
+// Workspace-relative resolution, per #3. The bug was that a relative
+// scriptPath resolved against the SESSION cwd, which broke the documented
+// modules/<name>/script.cs convention the moment the workspace was a project
+// adopted from somewhere else on disk -- exactly the manager workflow.
+await withEditor(async () => {
+	const execute = await jiti.import(join(EXT, "unity", "execute.ts"), { default: false });
+
+	// Two unrelated directories, deliberately named so no prefix of one is a
+	// prefix of the other: a cwd inside the workspace would let a
+	// resolve()-only implementation pass by accident.
+	const cwd = mkdtempSync(join(tmpdir(), "pi-unity-session-cwd-"));
+	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-workspace-"));
+	const manifest = {
+		version: 2,
+		id: "test",
+		projectPath: workspace,
+		scenePath: "Assets/Scenes/Main.unity",
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+		latestIteration: 1,
+		moduleRuns: [],
+		savedViews: [],
+		renderOutputs: [],
+		adopted: true,
+	};
+	writeFileSync(join(workspace, "unity-workspace.json"), JSON.stringify(manifest), "utf8");
+
+	const workspaceScript = join("modules", "liltoon-outline-rebuild", "verify7.cs");
+	const workspaceFile = join(workspace, workspaceScript);
+	mkdirSync(join(workspace, "modules", "liltoon-outline-rebuild"), { recursive: true });
+	writeFileSync(workspaceFile, "// workspace copy\n", "utf8");
+
+	try {
+		const found = await execute.unityExecuteCSharp({
+			cwd,
+			workspacePath: workspace,
+			scriptPath: workspaceScript,
+		});
+		check(
+			"a relative scriptPath resolves against the WORKSPACE, not the session cwd",
+			found.sourcePath === workspaceFile,
+			`got ${found.sourcePath}, want ${workspaceFile}`,
+		);
+		check("the workspace script's own source is what runs", found.stdout.includes("workspace copy"), JSON.stringify(found));
+
+		// Absolute paths are honoured verbatim -- that is the documented
+		// workaround from the report, so it must keep working.
+		const absolute = await execute.unityExecuteCSharp({
+			cwd,
+			workspacePath: workspace,
+			scriptPath: workspaceFile,
+		});
+		check("an absolute scriptPath is used as given", absolute.sourcePath === workspaceFile, absolute.sourcePath);
+
+		// The cwd fallback is tried only after the workspace, so a session that
+		// adopted nothing can still run its own script.
+		const cwdScript = join("scratch", "probe.cs");
+		mkdirSync(join(cwd, "scratch"), { recursive: true });
+		writeFileSync(join(cwd, cwdScript), "// cwd copy\n", "utf8");
+		const fromCwd = await execute.unityExecuteCSharp({
+			cwd,
+			workspacePath: workspace,
+			scriptPath: cwdScript,
+		});
+		check(
+			"a cwd-only script still resolves, via the fallback",
+			fromCwd.sourcePath === join(cwd, cwdScript),
+			`got ${fromCwd.sourcePath}`,
+		);
+
+		// The workspace wins when the SAME relative path exists in both roots:
+		// it is the documented layout, and picking cwd here is the bug.
+		const cwdTwin = join(cwd, workspaceScript.split("/").join(sep));
+		mkdirSync(dirname(cwdTwin), { recursive: true });
+		writeFileSync(cwdTwin, "// cwd copy\n", "utf8");
+		const both = await execute.unityExecuteCSharp({
+			cwd,
+			workspacePath: workspace,
+			scriptPath: workspaceScript,
+		});
+		check("the workspace wins when the same relative path exists in both roots", both.sourcePath === workspaceFile, both.sourcePath);
+		rmSync(cwdTwin, { force: true });
+
+		// The missing-file error must name every candidate absolute path and
+		// say which roots were tried. The old message named one path and never
+		// said where it came from, which is what made #3 hard to read.
+		let missing = null;
+		try {
+			await execute.unityExecuteCSharp({
+				cwd,
+				workspacePath: workspace,
+				scriptPath: "modules/nope/verify7.cs",
+			});
+		} catch (error) {
+			missing = error;
+		}
+		const message = missing instanceof Error ? missing.message : String(missing);
+		check("a missing scriptPath throws", missing !== null);
+		check("the error names the workspace candidate", message.includes(join(workspace, "modules/nope/verify7.cs")), message);
+		check("the error names the cwd candidate", message.includes(join(cwd, "modules/nope/verify7.cs")), message);
+		check("the error says which roots were tried", message.includes("workspace root first") && message.includes("session cwd"), message);
+		check("the error echoes the path as the caller wrote it", message.includes("modules/nope/verify7.cs"), message);
+
+		// inlineCode is the documented alternative and must not be disturbed:
+		// it stages a scratch file and reports THAT path as sourcePath.
+		const inline = await execute.unityExecuteCSharp({
+			cwd,
+			workspacePath: workspace,
+			inlineCode: "// inline\n",
+		});
+		check("inlineCode still stages a scratch file", inline.sourcePath.endsWith(".cs") && inline.stdout.includes("// inline"), inline.sourcePath);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+		rmSync(workspace, { recursive: true, force: true });
+	}
+});
+
+console.log("session workspace memory");
+
+// The reported half of #3: adopt a project in E:\ from a session in C:\Downloads
+// and the per-turn injection said "This project is NOT managed by pi (no
+// unity-workspace.json at C:\...)" -- because the one call with no workspace
+// argument (the live-state block) looked only in the session cwd, while
+// unity_workspace_init had written the manifest in the adopted project.
+await withEditor(async () => {
+	const index = await jiti.import(join(EXT, "index.ts"), { default: false });
+
+	const cwd = mkdtempSync(join(tmpdir(), "pi-unity-session-cwd-"));
+	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-adopted-"));
+	writeFileSync(
+		join(workspace, "unity-workspace.json"),
+		JSON.stringify({
+			version: 2,
+			id: "adopted",
+			projectPath: "/tmp/fake-project",
+			scenePath: "Assets/Scenes/Main.unity",
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			latestIteration: 4,
+			moduleRuns: [],
+			savedViews: [],
+			renderOutputs: [],
+			adopted: true,
+		}),
+		"utf8",
+	);
+
+	try {
+		check(
+			"nothing is remembered before a workspace is adopted",
+			index.hasRememberedWorkspace() === false && index.getRememberedWorkspace() === "",
+		);
+
+		index.rememberWorkspace(workspace);
+		check("an adopted workspace is remembered verbatim", index.getRememberedWorkspace() === workspace, index.getRememberedWorkspace());
+		check(
+			"an omitted workspace falls back to the remembered one, not the cwd",
+			index.resolveToolWorkspace(cwd, undefined) === workspace,
+			index.resolveToolWorkspace(cwd, undefined),
+		);
+		// Re-resolving an already-absolute path against a different root is a
+		// classic source of garbage, so the remembered value must never be
+		// re-resolved. Asserted only where a Windows drive letter is even
+		// absolute: on POSIX "E:\x" is an ordinary relative filename, and
+		// resolve() correctly joins it to the cwd.
+		if (sep === "\\") {
+			check(
+				"the remembered value is not re-resolved against the cwd",
+				index.resolveToolWorkspace(cwd, "E:\\VRCProjects\\Adopted") === "E:\\VRCProjects\\Adopted",
+				index.resolveToolWorkspace(cwd, "E:\\VRCProjects\\Adopted"),
+			);
+		}
+		check(
+			"an explicit workspace still wins over the remembered one",
+			index.resolveToolWorkspace(cwd, "somewhere-else") === join(cwd, "somewhere-else"),
+			index.resolveToolWorkspace(cwd, "somewhere-else"),
+		);
+
+		// The end-to-end symptom: with the manifest in the adopted workspace, the
+		// live state must say it is managed and must not name the session cwd.
+		const session = await jiti.import(join(EXT, "unity", "session-context.ts"), { default: false });
+		const ctx = await session.unitySessionContext({ cwd, workspace: index.getRememberedWorkspace() });
+		check("the adopted workspace's manifest is found", ctx.workspaceExists === true, ctx.note);
+		check("the adopted manifest's iteration is reported", ctx.workspacePath === workspace, ctx.workspacePath);
+		check("the 'NOT managed by pi' note is gone", !ctx.note.includes("NOT managed by pi"), ctx.note);
+		check("the note does not blame the session cwd", !ctx.note.includes(cwd), ctx.note);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+		rmSync(workspace, { recursive: true, force: true });
+	}
 });
 
 console.log("snippet output: logs, diagnostics, and partial results");
