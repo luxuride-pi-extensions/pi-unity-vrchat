@@ -197,6 +197,18 @@ namespace PiUnity
 			return result;
 		}
 
+		/// Objects inside an array, as parsed sub-documents.
+		///
+		/// GetStringArray cannot serve this: its items are handed back as
+		/// asString, which for an object is the raw `{...}` text rather than
+		/// anything with keys, so a caller reading members with it would see
+		/// unparseable braces where it expected a prefabPath.
+		public List<Json> GetArray(string key)
+		{
+			Json value = Get(key);
+			return value == null ? new List<Json>() : value.items;
+		}
+
 		private Json Get(string key)
 		{
 			return properties.TryGetValue(key, out Json value) ? value : null;

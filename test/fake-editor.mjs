@@ -337,6 +337,35 @@ const HANDLERS = {
 		children: ["Seat", "Back"],
 	}),
 
+	// Mirrors the C# handler's contract closely enough to be useful: members come
+	// back as REPORTED references, and a member the caller could not resolve is
+	// reported as not being one rather than quietly omitted. That asymmetry is
+	// what makes `isPrefabOfPrefabs` false rather than the count simply being
+	// short, so the fake has to be able to produce it.
+	"compose-prefab": (request) => {
+		const members = request.members ?? [];
+		const reported = members.map((member) => ({
+			name: member.name ?? member.prefabPath.split("/").pop().replace(/\.prefab$/, ""),
+			path: member.name ?? member.prefabPath,
+			// Every third member lands baked instead of referenced, so the test can
+			// exercise the partial case as well as the clean one.
+			sourceAsset: member.prefabPath.includes("Baked") ? "" : member.prefabPath,
+			landedAsReference: member.prefabPath.includes("Baked") ? "NOT a prefab reference" : "",
+			localPosition: member.position ?? "0,0,0",
+			localScale: member.scale ?? "1,1,1",
+		}));
+		const nestedCount = reported.filter((member) => member.sourceAsset !== "").length;
+		return {
+			prefabPath: `${request.destination}/${request.name}.prefab`,
+			rootName: request.name,
+			memberCount: members.length,
+			nestedCount,
+			isPrefabOfPrefabs: nestedCount === members.length,
+			members: reported,
+			bounds: { state: "asset-local renderer bounds, before any placement", size: "2,2,2" },
+		};
+	},
+
 	"find-source-models": (request) => ({
 		models: (request.gameObjectNames ?? []).map((name) => ({ gameObject: name, assetPath: `Assets/Models/${name}.fbx` })),
 		unhandoffableNames: [],

@@ -286,6 +286,187 @@ namespace PiUnity
 			return bounds;
 		}
 
+		/// Builds ONE composite prefab whose members are NESTED PREFAB INSTANCES.
+		///
+		/// Nesting, not merging, is the whole contract. PrefabUtility.SaveAsPrefabAsset
+		/// over an instantiated hierarchy records each child as a reference to the
+		/// asset it came from, so editing the chair prefab edits the chair in the house
+		/// in the island. A merged mesh would look identical in a render and stop
+		/// following anything, which is the failure this exists to prevent.
+		///
+		/// The build runs in a PREVIEW scene. Saving a prefab is not a scene edit, but
+		/// creating the throwaway root in the active scene and destroying it would
+		/// dirty the user's scene on a call that is only meant to write an asset.
+		private static string ComposePrefab(Json request)
+		{
+			string destination = request.GetString("destination");
+			string prefabName = request.GetString("name");
+			if (string.IsNullOrEmpty(destination))
+				throw new Exception("compose-prefab requires a destination folder inside Assets/.");
+			if (!destination.StartsWith("Assets"))
+				throw new Exception(
+					"destination must be an ASSET-RELATIVE path inside Assets/, e.g. \"Assets/Homeworld/HouseJapanese\". " +
+					"Got \"" + destination + "\"."
+				);
+			if (string.IsNullOrEmpty(prefabName))
+				throw new Exception("compose-prefab requires a name, used as the prefab's file name.");
+
+			foreach (char invalid in System.IO.Path.GetInvalidFileNameChars())
+			{
+				if (prefabName.IndexOf(invalid) >= 0)
+					throw new Exception(
+						"\"" + prefabName + "\" contains '" + invalid + "', which is not a legal file name character."
+					);
+			}
+
+			List<Json> members = request.GetArray("members");
+			if (members.Count == 0)
+				throw new Exception(
+					"compose-prefab requires at least one member. A composite of nothing is not a prefab worth saving."
+				);
+
+			// Resolve every member BEFORE building anything, so a bad path in member
+			// seven does not leave a half-built hierarchy behind.
+			var assets = new List<GameObject>();
+			foreach (Json member in members)
+			{
+				string prefabPath = member.GetString("prefabPath");
+				if (string.IsNullOrEmpty(prefabPath))
+					throw new Exception("Every compose-prefab member needs a prefabPath.");
+
+				var asset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+				if (asset == null)
+				{
+					throw new Exception(
+						"No loadable asset at \"" + prefabPath + "\". Call unity_scene_info { categories: [\"assets\"] } " +
+						"for the real paths -- a path is asset-relative, so \"Assets/...\", not an absolute path."
+					);
+				}
+				if (PrefabUtility.GetPrefabAssetType(asset) == PrefabAssetType.Model)
+					throw new Exception(
+						"\"" + prefabPath + "\" is a MODEL asset (FBX/OBJ), not a prefab. A composite nests PREFABS, and a " +
+						"model has no prefab to reference. Import it as a prefab first with unity_compose_prefab's own " +
+						"predecessor step, or point this member at the prefab that wraps it."
+					);
+				assets.Add(asset);
+			}
+
+			PiMaterial.EnsureFolder(destination);
+			string targetPath = destination + "/" + prefabName + ".prefab";
+			if (AssetDatabase.LoadAssetAtPath<GameObject>(targetPath) != null)
+			{
+				throw new Exception(
+					"A prefab already exists at \"" + targetPath + "\". A composite is rebuilt from its members, so delete " +
+					"the existing one and compose again rather than overwriting it."
+				);
+			}
+
+			Scene preview = EditorSceneManager.NewPreviewScene();
+			GameObject root = null;
+			try
+			{
+				root = new GameObject(prefabName);
+				SceneManager.MoveGameObjectToScene(root, preview);
+
+				var placed = new List<GameObject>();
+				for (int i = 0; i < assets.Count; i++)
+				{
+					GameObject instance = PrefabUtility.InstantiatePrefab(assets[i], preview) as GameObject;
+					if (instance == null)
+					{
+						throw new Exception(
+							"Unity produced no instance from \"" + members[i].GetString("prefabPath") + "\". That asset is " +
+							"loadable but is not something PrefabUtility can instantiate as a prefab."
+						);
+					}
+					SceneManager.MoveGameObjectToScene(instance, preview);
+					instance.transform.SetParent(root.transform, false);
+
+					string memberName = members[i].GetString("name");
+					if (!string.IsNullOrEmpty(memberName)) instance.name = memberName;
+					instance.transform.localPosition = ReadVector3(members[i], "position", Vector3.zero);
+					instance.transform.localEulerAngles = ReadVector3(members[i], "rotation", Vector3.zero);
+					instance.transform.localScale = ReadVector3(members[i], "scale", Vector3.one);
+
+					// A rename or a local transform on a fresh instance is an OVERRIDE.
+					// Recorded with no base, an override is what the next Apply silently
+					// discards.
+					PrefabUtility.RecordPrefabInstancePropertyModifications(instance.transform);
+					PrefabUtility.RecordPrefabInstancePropertyModifications(instance);
+					placed.Add(instance);
+				}
+
+				var saved = PrefabUtility.SaveAsPrefabAsset(root, targetPath, out bool success);
+				if (!success || saved == null)
+				{
+					throw new Exception(
+						"Unity refused to save the composite prefab at \"" + targetPath + "\". SaveAsPrefabAsset failed; " +
+						"check the destination folder exists and is writable."
+					);
+				}
+			}
+			finally
+			{
+				if (root != null) UnityEngine.Object.DestroyImmediate(root);
+				EditorSceneManager.ClosePreviewScene(preview);
+			}
+
+			AssetDatabase.SaveAssets();
+
+			// RE-READ the saved asset rather than reporting what was just built. The
+			// claim this tool makes is that the members are REFERENCES, and only the
+			// asset on disk can confirm that -- the in-memory hierarchy is gone by now.
+			var composite = AssetDatabase.LoadAssetAtPath<GameObject>(targetPath);
+			if (composite == null)
+			{
+				throw new Exception(
+					"The composite was saved but cannot be loaded back at \"" + targetPath + "\". The asset is unusable; " +
+					"inspect the project before composing again."
+				);
+			}
+
+			int nestedCount = 0;
+			var report = new Json();
+			report.OpenArray();
+			foreach (Transform child in composite.transform)
+			{
+				bool isReference =
+					PrefabUtility.IsPartOfPrefabInstance(child.gameObject) &&
+					PrefabUtility.GetCorrespondingObjectFromSource(child.gameObject) != null;
+				if (isReference) nestedCount++;
+
+				report.OpenObject();
+				report.AddString("name", child.name);
+				report.AddString("path", child.name);
+				report.AddString(
+					"sourceAsset",
+					isReference
+						? AssetDatabase.GetAssetPath(PrefabUtility.GetCorrespondingObjectFromSource(child.gameObject))
+						: "");
+				report.AddString("landedAsReference", isReference ? "" : "NOT a prefab reference");
+				report.AddArray("localPosition", VectorToJson(child.localPosition));
+				report.AddArray("localScale", VectorToJson(child.localScale));
+				report.CloseObject();
+			}
+			report.CloseArray();
+
+			Renderer renderer = composite.GetComponentInChildren<Renderer>(true);
+
+			Json result = new Json();
+			result.OpenObject();
+			result.AddString("prefabPath", targetPath);
+			result.AddString("rootName", composite.name);
+			result.AddNumber("memberCount", members.Count);
+			result.AddNumber("nestedCount", nestedCount);
+			// false here is the honest answer that matters: something in the composite
+			// is a baked copy, and will not follow its source asset.
+			result.AddBool("isPrefabOfPrefabs", nestedCount == members.Count);
+			result.AddValue("members", report);
+			result.AddValue("bounds", DescribeAssetBounds(composite, renderer));
+			result.CloseObject();
+			return result.ToString();
+		}
+
 		private static Vector3 ReadVector3(Json request, string key, Vector3 fallback)
 		{
 			string[] parts = SplitNumbers(request.GetString(key) ?? "");
