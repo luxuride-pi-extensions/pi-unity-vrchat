@@ -236,6 +236,66 @@ return Json.Parse(wrapper.ToString()).GetString("v");
 			Json.Parse("{\"v\":\"a\\qb\"}").GetString("v") == "a\\qb",
 			Json.Parse("{\"v\":\"a\\qb\"}").GetString("v"));
 
+		// 12. unity_scene_info's material shape: a material is an OBJECT, and its
+		//     colour is a KEYED array inside it.
+		//
+		//     The material loop used to write the colour as an anonymous array
+		//     directly into the material object:
+		//
+		//       materials.OpenArray(); materials.Add(color.r); ... CloseArray();
+		//
+		//     which emits a bare `"[0.8,0.8,0.8,1]"` at an element position where
+		//     a `"baseColor":` pair belongs -- a syntax error that only appears
+		//     when a material exposes _BaseColor, i.e. on shader-graph and
+		//     lilToon projects. A ~50KB scene payload then failed to parse at
+		//     whatever offset the offending material happened to land on.
+		//     Assert the keyed form parses, and that the bare form does NOT, so
+		//     a future "simplification" back to it fails here instead of in a
+		//     50KB one-line response on a real avatar project.
+		Json material = new Json();
+		material.OpenObject();
+		material.AddString("name", "Body");
+		material.AddString("shader", "VRChat/Mobile/Standard");
+		Json baseColor = new Json();
+		baseColor.OpenArray();
+		baseColor.Add(0.8);
+		baseColor.Add(0.8);
+		baseColor.Add(0.8);
+		baseColor.Add(1.0);
+		baseColor.CloseArray();
+		material.AddArray("baseColor", baseColor);
+		material.AddString("renderQueue", "2000");
+		material.CloseObject();
+		Json materialsRoot = new Json();
+		materialsRoot.OpenObject();
+		Json materialList = new Json();
+		materialList.OpenArray();
+		materialList.AddElement(material);
+		materialList.CloseArray();
+		materialsRoot.AddValue("materials", materialList);
+		materialsRoot.CloseObject();
+		string materialError = "";
+		Json materialParsed = null;
+		try { materialParsed = Json.Parse(materialsRoot.ToString()); }
+		catch (Exception error) { materialError = error.Message; }
+		Check("a material object with a keyed baseColor parses", materialParsed != null,
+			materialError + " :: " + materialsRoot.ToString());
+
+		Json brokenMaterial = new Json();
+		brokenMaterial.OpenObject();
+		brokenMaterial.AddString("name", "Body");
+		Json bareColor = new Json();
+		bareColor.OpenArray();
+		bareColor.Add(0.8);
+		bareColor.CloseArray();
+		brokenMaterial.AddElement(bareColor);
+		brokenMaterial.CloseObject();
+		bool bareRejected = false;
+		try { Json.Parse(brokenMaterial.ToString()); }
+		catch (Exception) { bareRejected = true; }
+		Check("an unkeyed value inside an object is rejected (the shape this replaces)",
+			bareRejected, brokenMaterial.ToString());
+
 		Console.WriteLine();
 		Console.WriteLine(failures == 0
 			? "all JSON writer self-tests passed"
