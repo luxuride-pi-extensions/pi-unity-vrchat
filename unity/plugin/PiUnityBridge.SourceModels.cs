@@ -228,7 +228,34 @@ namespace PiUnity
 		{
 			string outputDir = request.GetString("outputDir");
 			if (string.IsNullOrEmpty(outputDir)) throw new Exception("export-source-models requires an outputDir.");
-			Directory.CreateDirectory(outputDir);
+			// Staging, not project content: this is a scratch copy for another
+			// application to open, and writing model files into the project would
+			// make Unity import them. The destination is caller-chosen and the C#
+			// side has no idea where "scratch" is, so the only containment claim
+			// worth making here is the negative one that matters: it must NOT be
+			// inside Assets/. Normalised first, so ".." cannot hide the answer.
+			string stagingRoot;
+			try
+			{
+				stagingRoot = Path.GetFullPath(outputDir);
+			}
+			catch (Exception error)
+			{
+				throw new Exception("outputDir \"" + outputDir + "\" is not a usable path: " + error.Message);
+			}
+			string projectRoot = Path.GetFullPath(ProjectRoot());
+			string assetsRoot = Path.Combine(projectRoot, "Assets");
+			bool insideAssets = stagingRoot.Equals(assetsRoot, StringComparison.Ordinal)
+				|| stagingRoot.StartsWith(assetsRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+			if (insideAssets)
+			{
+				throw new Exception(
+					"outputDir \"" + outputDir + "\" resolves to \"" + stagingRoot + "\", which is inside this " +
+					"project's Assets/ folder. Copying a model file into Assets/ makes Unity import it as a new " +
+					"asset. Pass a scratch or cache directory outside the project instead."
+				);
+			}
+			Directory.CreateDirectory(stagingRoot);
 
 			GameObject[] roots = ResolveHandoffRoots(request);
 			List<string> ungrouped;
@@ -236,6 +263,16 @@ namespace PiUnity
 			Dictionary<string, int> ungroupedCounts;
 			List<SourceGroup> groups = CollectSourceGroups(roots, out ungrouped, out ungroupedNames, out ungroupedCounts);
 
+			// The name the file is written under is decided ONCE, here, and the
+			// returned `stagedPath` is that decision rather than a recomputation of
+			// it. Basename alone is not enough: Assets/A/Body.fbx and
+			// Assets/B/Body.fbx both stage to `<outputDir>/Body.fbx`, so the
+			// second copy overwrote the first while BOTH entries reported
+			// copied:true -- two models were requested and one was silently
+			// destroyed. So the first claimant keeps the plain basename and a
+			// collision takes the source sub-path, flattened, which is unique for
+			// distinct asset paths.
+			var stagedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 			var copied = new List<string>();
 			var missing = new List<string>();
 			var report = new List<Json>();
@@ -257,7 +294,7 @@ namespace PiUnity
 				}
 				else
 				{
-					string target = Path.Combine(outputDir, Path.GetFileName(group.AssetPath));
+					string target = Path.Combine(stagingRoot, UniqueStagedName(group.AssetPath, stagedNames));
 					File.Copy(group.AbsolutePath, target, true);
 					entry.AddString("stagedPath", target);
 					entry.AddBool("copied", true);
@@ -286,8 +323,40 @@ namespace PiUnity
 			result.AddNumber("copiedCount", copied.Count);
 			result.AddNumber("missingCount", missing.Count);
 			result.AddNumber("unhandoffableCount", ungrouped.Count);
+			result.AddString(
+				"stagingNote",
+				"Files are staged under their own file names, so the destination directory is never assumed to be " +
+				"empty: two source models with the same file name are staged as \"Body.fbx\" and \"A-Body.fbx\" " +
+				"rather than one overwriting the other. Each entry's stagedPath is what was actually written.");
 			result.CloseObject();
 			return result.ToString();
+		}
+
+		/// A stage name unique within one run, derived from the asset path.
+		///
+		/// The plain file name first, because that is what a caller with one
+		/// model expects to find. A colliding basename takes its source
+		/// sub-path with the separators flattened, which is unique for distinct
+		/// asset paths; a further collision (two paths that flatten alike) falls
+		/// back to a suffix rather than overwriting.
+		private static string UniqueStagedName(string assetPath, HashSet<string> taken)
+		{
+			string fileName = Path.GetFileName(assetPath);
+			string extension = Path.GetExtension(fileName);
+			string stem = Path.GetFileNameWithoutExtension(fileName);
+			if (taken.Add(fileName)) return fileName;
+
+			string relative = assetPath;
+			if (relative.StartsWith("Assets/", StringComparison.Ordinal)) relative = relative.Substring("Assets/".Length);
+			string flattened = relative.Replace('/', '-').Replace('\\', '-') + extension;
+			if (taken.Add(flattened)) return flattened;
+
+			for (int suffix = 2; suffix < 1000; suffix++)
+			{
+				string candidate = flattened + "." + suffix + extension;
+				if (taken.Add(candidate)) return candidate;
+			}
+			return flattened + "." + taken.Count + extension;
 		}
 	}
 }
