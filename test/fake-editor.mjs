@@ -217,7 +217,24 @@ const HANDLERS = {
 		if (request.action === "create-light-volume") {
 			// range/intensity come back EXACTLY as sent, fractions included, so a
 			// test can catch a side that coerces them to integers.
-			return { component: "VRCLightVolumes.PointLightVolume", range: String(request.range), intensity: String(request.intensity), color: "#ffffff" };
+			//
+			// color REFUSES an absent or malformed value rather than inventing
+			// one, because the declared default is supposed to be applied on the
+			// TS side (unity/bridge.ts). A double that quietly substituted
+			// "#ffffff" for a missing colour would make that assertion pass
+			// against the exact forwarding bug this models -- the real C# fallback
+			// is exactly the second source of truth the finding is about.
+			if (typeof request.color !== "string" || !/^[0-9a-fA-F]{6}$/.test(request.color)) {
+				throw new Error(
+					`create-light-volume: no usable colour reached the bridge (got ${JSON.stringify(request.color)})`,
+				);
+			}
+			return {
+				component: "VRCLightVolumes.PointLightVolume",
+				range: String(request.range),
+				intensity: String(request.intensity),
+				color: `#${request.color.toLowerCase()}`,
+			};
 		}
 		if (request.action === "find-behaviour") {
 			return {
@@ -247,8 +264,20 @@ const HANDLERS = {
 			request.action === "set-clip-load-type"
 		) {
 			// Mutating actions tag their report with the action, so two in a row
-			// are tellable apart without re-reading prose.
-			return { action: request.action, report: `world action=${request.action} ok` };
+			// are tellable apart without re-reading prose. volume and spatial are
+			// ECHOED for the same reason color is: their declared defaults
+			// ("1" and "0") belong on the TS side, and a double that invented
+			// them would hide the forwarding bug.
+			return {
+				action: request.action,
+				report: `world action=${request.action} ok`,
+				...(request.action === "add-audio-source"
+					? { volume: request.volume, spatial: request.spatial }
+					: {}),
+				...(request.action === "add-collider" || request.action === "add-trigger"
+					? { size: request.size ?? "" }
+					: {}),
+			};
 		}
 		return { report: `world action=${request.action} ok` };
 	},
