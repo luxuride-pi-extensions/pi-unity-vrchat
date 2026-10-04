@@ -10,31 +10,25 @@ permissions:
   contents: read
 
 jobs:
-  unit:
-    name: unit tests and typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      # --legacy-peer-deps is not optional here. package.json declares
-      # peerDependencies: { "pi-manager-core": "*" }, which is the documented
-      # shape for a Pi package (docs/packages.md): it is loaded from the
-      # extensions directory, not installed from the registry. Plain `npm ci`
-      # therefore fails with 404 on a package that was never published, before a
-      # single test runs.
-      - run: npm ci --legacy-peer-deps
-      - run: npm run typecheck
-      - run: npm test
-
-  manager-core:
-    name: manager-core consistency
+  # There is no token-free job in this repository, which is a property of the
+  # suite rather than an omission.
+  #
+  # index.ts calls loadManagerCore() at module scope, and
+  # test/run-bridge-tests.mjs imports index.ts directly. So the moment the
+  # suite loads this extension at all it needs pi-manager-core's source on
+  # disk, and without it the run dies at import with
+  #
+  #   Error: manager-core could not be found. Looked in: pi's installed
+  #   extensions dir (...); a sibling checkout of manager-core; a sibling
+  #   checkout of pi-manager-core.
+  #
+  # before a single check runs. Splitting the suite so a "unit" job could
+  # report some passing subset would be a green light for a suite that has not
+  # been run.
+  test:
+    name: unit tests, typecheck, and manager-core consistency
     # pi-manager-core, pi-blender and pi-unity-blender are separate PRIVATE
-    # repositories, so this job needs a PAT with read access to the org:
+    # repositories, so this needs a PAT with read access to the org:
     # GITHUB_TOKEN cannot read a private repository even in the same org.
     #
     # Gated on a repository VARIABLE rather than `secrets`: `secrets` is not in
@@ -45,26 +39,19 @@ jobs:
     # siblings" -- which is a property of the configuration, not of whether a
     # particular PAT happens to be populated today.
     if: ${{ vars.CONSUMER_REPOS_ENABLED == '1' }}
-    needs: unit
     runs-on: ubuntu-latest
     steps:
       # pi-manager-core first, so this repo lands in a subdirectory and the
-      # sibling checkouts can go beside it -- which is the layout
-      # resolver-copies and allowlists look for, the same one the four repos
-      # have in a working directory.
+      # sibling checkouts can go beside it -- the layout resolver-copies and
+      # allowlists look for, and the layout these four repos have in a working
+      # directory.
       - uses: actions/checkout@v4
         with:
           repository: luxuride-pi-extensions/pi-manager-core
           ref: master
           path: projects/pi-manager-core
-          # github.token cannot read a PRIVATE repository.
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      # The two extensions this repo's own tests compose their prompts from.
-      # agent-templates.mjs resolves a template's tools by loading every
-      # extension named in it, out of the INSTALLED extensions dir, and
-      # engagement-test.mjs asserts two managers stay silent until engaged --
-      # both against extensions that have to exist. On a runner none do.
       - uses: actions/checkout@v4
         with:
           repository: luxuride-pi-extensions/pi-blender
@@ -86,39 +73,56 @@ jobs:
           node-version: 22
           cache: npm
 
+      # The core's own dependency install, and not just its files: jiti is a
+      # transitive dependency of @earendil-works/pi-coding-agent, so this is
+      # the only place on a clean runner where the loader these tests need
+      # exists.
       - name: install the manager core
         working-directory: projects/pi-manager-core
         run: npm ci
 
+      # --legacy-peer-deps because every repo here declares
+      # peerDependencies: { "pi-manager-core": "*" }, which is the documented
+      # shape for a Pi package (docs/packages.md) -- loaded from the extensions
+      # directory, not installed from the registry -- so plain `npm ci` fails
+      # with 404 on a package that was never published.
       - name: install the sibling extensions
         run: |
           for repo in pi-blender pi-unity-blender; do
             (cd "projects/$repo" && npm ci --legacy-peer-deps)
           done
 
-      # Names pi installs under, which are not the repo names: the binder
-      # extension is "unity-blender", and pi's own resolver probes both
-      # "manager-core" and "pi-manager-core" when a consumer looks for it.
+      - name: install pi-unity
+        run: npm ci --legacy-peer-deps
+
+      # The suite loads extensions out of the INSTALLED extensions dir, not
+      # from sibling checkouts: agent-templates.mjs and engagement-test.mjs
+      # resolve a manager's tools by loading every extension named in its
+      # prompt, and doc-consistency.mjs reads pi-unity's index.ts from there.
+      # A checkout that is not installed is silently absent.
+      #
+      # The names are the ones pi installs under, which are not the repo names:
+      # the binder extension is "unity-blender", and pi's own resolver probes
+      # both "manager-core" and "pi-manager-core" when a consumer looks for it.
       - name: link the extensions into an agent dir
         run: |
           agent="$RUNNER_TEMP/agent-dir/extensions"
           mkdir -p "$agent"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-unity"         "$agent/pi-unity"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"       "$agent/pi-blender"
+          ln -s "$GITHUB_WORKSPACE"                        "$agent/pi-unity"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"    "$agent/pi-blender"
           ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender" "$agent/unity-blender"
           ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core" "$agent/manager-core"
 
-      - name: install and test
+      - name: typecheck and test
         env:
           PI_AGENT_DIR: ${{ runner.temp }}/agent-dir
           PI_INSTALL_DIR: ${{ runner.temp }}/agent-dir/install
         run: |
-          npm ci --legacy-peer-deps
           npm run typecheck
           npm test
 
-      # The core's own cross-repo checks, run against the sibling checkouts
-      # above: resolver-copies diffs this repo's manager-core.ts and
+      # The core's own cross-repo checks, against the checkouts above:
+      # resolver-copies diffs this repo's manager-core.ts and
       # agent-template-checks.mjs against the canonical files, allowlists
       # asserts every tool this manager's prompt names is in the index.ts
       # allowlist, and dependency-declaration asserts the peer range.
@@ -139,12 +143,12 @@ jobs:
             node test/$check.mjs
           done
 
+  # Deliberately manual. These need a Unity Editor install and a licence
+  # (unity-ci/activate-unity-editor), plus a project with a populated
+  # Library/Bee to borrow a reference set from -- none of which belongs in a
+  # required check on a pull request.
   plugin:
     name: C# plugin self-tests
-    # Deliberately manual. These need a Unity Editor install and a licence
-    # (unity-ci/activate-unity-editor), plus a project with a populated
-    # Library/Bee to borrow a reference set from -- none of which belongs in a
-    # required check on a pull request.
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: macos-latest
     steps:
