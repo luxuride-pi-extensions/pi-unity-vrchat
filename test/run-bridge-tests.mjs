@@ -44,6 +44,36 @@ function check(name, condition, detail = "") {
 	}
 }
 
+/**
+ * Wait for the fake Editor to CONSUME a control command.
+ *
+ * The double polls `<bridgeDir>/control.json` on a 50 ms timer, applies it, then
+ * rewrites the file to "{}" so the same command is not re-applied forever. That
+ * reset is the only acknowledgement it offers, and waiting for it is what makes
+ * "arm the Editor, then send the request" deterministic instead of a race: a
+ * request written before the timer fires is answered by the PREVIOUS state, so
+ * an armed failure comes back as a success and every check in that block fails
+ * at once. On a fast local box the tool's own path validation takes longer than
+ * 50 ms and hides the race; on a runner it does not.
+ *
+ * The timeout is a floor on the wait, not a substitute for it -- if the Editor
+ * never consumes the command the harness proceeds and the checks report what
+ * actually happened, rather than hanging until the job is killed.
+ */
+async function controlApplied(bridgeDir, timeoutMs = 5_000) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const raw = readFileSync(join(bridgeDir, "control.json"), "utf8");
+			if (raw.trim() === "{}" || raw.trim() === "") return true;
+		} catch {
+			return true; // gone: nothing left to wait for
+		}
+		await sleep(25);
+	}
+	return false;
+}
+
 async function withEditor(fn) {
 	const dir = mkdtempSync(join(tmpdir(), "pi-unity-bridge-"));
 	const bridgeDir = join(dir, "bridge");
@@ -67,7 +97,16 @@ async function withEditor(fn) {
 	try {
 		// dir is handed to the callback so a test can write a file the fake Editor
 		// claims to have produced, rather than asserting against a path nothing wrote.
-		return await fn({ dir, bridgeDir, setControl: (o) => writeFileSync(join(bridgeDir, "control.json"), JSON.stringify(o)) });
+		// setControl resolves only once the Editor has applied the command; see
+		// controlApplied for why the naive writeFileSync version races.
+		return await fn({
+			dir,
+			bridgeDir,
+			setControl: async (o) => {
+				writeFileSync(join(bridgeDir, "control.json"), JSON.stringify(o));
+				return await controlApplied(bridgeDir);
+			},
+		});
 	} finally {
 		if (previous === undefined) delete process.env.PI_UNITY_BRIDGE_DIR;
 		else process.env.PI_UNITY_BRIDGE_DIR = previous;
@@ -118,7 +157,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	check("execute-csharp returns stdout", run?.stdout?.includes("vertexTotal"), JSON.stringify(run));
 
 	// 5. open-scene refuses while the fake reports unsaved changes.
-	setControl({ sceneDirty: true });
+	await setControl({ sceneDirty: true });
 	await sleep(200);
 	let refused = "";
 	try {
@@ -136,7 +175,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	);
 
 	// 6. A timeout withdraws the request and says so actionably.
-	setControl({ sceneDirty: false, delayMs: 3_000 });
+	await setControl({ sceneDirty: false, delayMs: 3_000 });
 	await sleep(200);
 	let timeoutMessage = "";
 	const started = Date.now();
@@ -157,7 +196,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	check("timed-out request is withdrawn", pendingAfter.length === 0, `left: ${pendingAfter.join(", ")}`);
 
 	// 8. The lock is released after a failure, so the next request still works.
-	setControl({ delayMs: 0 });
+	await setControl({ delayMs: 0 });
 	await sleep(300);
 	let recovered = "";
 	try {
@@ -184,7 +223,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// that finished in seconds still burned the entire budget. What the wait
 	// settles on is the CAPTURE, written only when a compile really finished.
 	// A heartbeat that stops mid-wait is a dead Editor, which is not a verdict.
-	setControl({ freezeHeartbeat: true });
+	await setControl({ freezeHeartbeat: true });
 	await sleep(300);
 	const raced = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
 	const raceMessage = JSON.stringify(raced);
@@ -218,12 +257,12 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 		JSON.stringify(raced),
 	);
 
-	setControl({ freezeHeartbeat: false });
+	await setControl({ freezeHeartbeat: false });
 	await sleep(400);
 
 	// A capture that lands DURING the wait, reporting the compiler's own error
 	// -- the real shape of a compile, which takes time.
-	setControl({
+	await setControl({
 		compileErrors: ["Assets/UdonSharp/UtilityScripts/ZoneAudioVolume.cs(132,47): error CS0246: The type or namespace name 'VRCPlayerApi' could not be found"],
 		compileWarnings: ["Assets/Foo.cs(1,1): warning CS0168: unused variable"],
 		captureInMs: 1_500,
@@ -252,7 +291,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// would report success before the compile even started. Observed live: the
 	// first read happened a tick after entry, so a baseline taken inside the
 	// loop accepted the stale file and returned "compiled" in 501ms.
-	setControl({ compileErrors: [], compileWarnings: [] });
+	await setControl({ compileErrors: [], compileWarnings: [] });
 	await sleep(300);
 	const stale = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
 	check(
@@ -262,7 +301,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	);
 
 	// And the clean case, on the same capture path, with the capture refreshed.
-	setControl({ compileErrors: [], compileWarnings: [], captureInMs: 1_000 });
+	await setControl({ compileErrors: [], compileWarnings: [], captureInMs: 1_000 });
 	const clean = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 8_000 });
 	check("a clean compile reports compiled", clean.status === "compiled", JSON.stringify(clean));
 	check("a clean compile carries no errors", clean.errors.length === 0, JSON.stringify(clean));
@@ -270,7 +309,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// No capture at all: the log fallback answers, and its errors must NOT be
 	// dressed up as if the compiler event had said them.
 	rmSync(capturePath, { force: true });
-	setControl({ writeCompileMessages: false });
+	await setControl({ writeCompileMessages: false });
 	await sleep(300);
 	const fromLog = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_200 });
 	check("with no capture the wait times out rather than answering", fromLog.status === "timeout", JSON.stringify(fromLog));
@@ -281,7 +320,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// of the wait, so a wait that settled on any new file would answer
 	// "compiled" while the compiler was still running. Settling on the marker is
 	// the regression; naming it is what tells a slow compile from a hang.
-	setControl({ captureInMs: 400, captureNeverFinishes: true });
+	await setControl({ captureInMs: 400, captureNeverFinishes: true });
 	const inFlight = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_500 });
 	check("a cycle that began but has not finished does NOT settle the wait", inFlight.status === "timeout", JSON.stringify(inFlight));
 	check("an unfinished cycle is named as one", inFlight.compileInFlight === true, JSON.stringify(inFlight));
@@ -291,7 +330,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// without the cycle handler a no-op compile in a clean project always timed
 	// out. Measured live: compilationStarted/Finished fired 1s after the request
 	// while neither assembly event fired at all.
-	setControl({ captureInMs: 600, captureAssembly: "" });
+	await setControl({ captureInMs: 600, captureAssembly: "" });
 	const noAssembly = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 6_000 });
 	check("a compile with no assembly to report still settles", noAssembly.status === "compiled", JSON.stringify(noAssembly));
 
@@ -308,7 +347,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// reported as never compiled forever, because no later compile moves that
 	// timestamp either. So once the compiler has spoken, its verdict stands
 	// alone and the proxy is not consulted.
-	setControl({ captureInMs: 600, captureAssembly: "Library/ScriptAssemblies/Assembly-CSharp.dll", compileStatusStale: true });
+	await setControl({ captureInMs: 600, captureAssembly: "Library/ScriptAssemblies/Assembly-CSharp.dll", compileStatusStale: true });
 	const greenBuild = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 6_000 });
 	check("a clean build is not called failed by a stale needsCompile", greenBuild.status === "compiled", JSON.stringify(greenBuild));
 	check("that build reports no errors at all", greenBuild.errors.length === 0, JSON.stringify(greenBuild.errors));
@@ -318,7 +357,7 @@ await withEditor(async ({ bridgeDir, setControl }) => {
 	// every script is broken as clean, because a broken project logs its
 	// errors once and then never again. needsCompile is then the only evidence
 	// there is, so it is kept.
-	setControl({ captureInMs: 600, captureNeverFinishes: true, compileStatusStale: true });
+	await setControl({ captureInMs: 600, captureNeverFinishes: true, compileStatusStale: true });
 	const neverSpoke = await bridge.requestLiveUnityAwaitCompile({ timeoutMs: 1_500 });
 	check("a wait with no compiler verdict stays a timeout, never clean", neverSpoke.status === "timeout", JSON.stringify(neverSpoke));
 });
@@ -1093,7 +1132,7 @@ await withEditor(async ({ setControl }) => {
 	//    Asserted as an array rather than undefined because the C# always
 	//    writes the key now, and a caller that iterates it must not have to
 	//    guess whether the field is missing or empty.
-	setControl({ failedExecute: null });
+	await setControl({ failedExecute: null });
 	const okRun = await execute.unityExecuteCSharp({
 		cwd: EXT,
 		workspacePath: workspace,
@@ -1124,7 +1163,7 @@ await withEditor(async ({ setControl }) => {
 	// 3. A snippet that threw: the failure envelope now carries the payload.
 	//    This is the heart of the fix -- the C# writes ok:false WITH a result,
 	//    and bridge.ts used to drop that result on the floor.
-	setControl({
+	await setControl({
 		failedExecute: {
 			message: "C# snippet threw: System.NullReferenceException: Object reference not set",
 			result: {
@@ -1169,7 +1208,7 @@ await withEditor(async ({ setControl }) => {
 	// the location -- and unity/plugin/PiUnityBridge.Compiler.cs already spends a
 	// helper (StripImplicitUsingOffset) correcting the line number so it matches
 	// the caller's own file. Losing that work to a reformat would be invisible.
-	setControl({
+	await setControl({
 		failedExecute: {
 			message: "C# snippet failed to compile:\nPiSnippet.cs(12,19): error CS0103",
 			result: {
@@ -1201,10 +1240,8 @@ await withEditor(async ({ setControl }) => {
 	//    unity_bridge_status, open-scene and friends still reply ok:false with
 	//    only an error string; pretending they carry a payload would attach an
 	//    empty object to every one of them.
-	setControl({ failedExecute: null });
-	await sleep(1_100);
-	setControl({ sceneDirty: true });
-	await sleep(1_100);
+	await setControl({ failedExecute: null });
+	await setControl({ sceneDirty: true });
 	let bare = "";
 	try {
 		await bridge.requestLiveUnityBridge({ payload: { type: "open-scene", scenePath: "Assets/Other.unity" }, timeoutMs: 5_000 });
