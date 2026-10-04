@@ -59,7 +59,14 @@ namespace PiUnity
 
 			// Move the FBX into Assets/ so the import produces a sub-asset we can
 			// instantiate, then pull a prefab out of it for a stable handle.
-			string assetFbxPath = MoveIntoAssets(fbxPath, destination, ".fbx");
+			// modelName is passed in rather than re-derived from the FBX's own file
+			// name: the guard above checked `destination/modelName.fbx`, so the copy
+			// target MUST be that same name or the check is theatre. It happens to
+			// coincide on the only live path -- the binder stages the file as
+			// `${modelName}.fbx` before calling -- but a caller who passes `name`
+			// different from the stem used to get the guard checked and a different
+			// file overwritten, with ok:true on top.
+			string assetFbxPath = MoveIntoAssets(fbxPath, destination, modelName, ".fbx");
 			GameObject assetRoot = AssetDatabase.LoadAssetAtPath<GameObject>(assetFbxPath);
 			if (assetRoot == null)
 				throw new Exception("Unity did not produce a model for " + assetFbxPath + ". Check the Editor log for importer errors.");
@@ -105,13 +112,15 @@ namespace PiUnity
 			return trimmed;
 		}
 
-		private static string MoveIntoAssets(string sourcePath, string destinationFolder, string extension)
+		/// `targetName` is the stem the copied file gets. It is an argument rather
+		/// than something re-derived from `sourcePath` because the caller has
+		/// already checked a name, and a copy that lands under a DIFFERENT name
+		/// than the one checked is the exact overwrite this method is reached from.
+		private static string MoveIntoAssets(string sourcePath, string destinationFolder, string targetName, string extension)
 		{
-			if (!destinationFolder.StartsWith("Assets", StringComparison.Ordinal))
-				throw new Exception("destination must be inside Assets/, got: " + destinationFolder);
-			string absolute = Path.Combine(ProjectRoot(), destinationFolder);
+			string absolute = ResolveAssetsFolder(destinationFolder);
 			Directory.CreateDirectory(absolute);
-			string target = Path.Combine(absolute, Path.GetFileNameWithoutExtension(sourcePath) + extension);
+			string target = Path.Combine(absolute, targetName + extension);
 			if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(target), StringComparison.Ordinal))
 				File.Copy(sourcePath, target, true);
 			AssetDatabase.ImportAsset(destinationFolder + "/" + Path.GetFileName(target), ImportAssetOptions.ForceUpdate);
@@ -257,7 +266,16 @@ namespace PiUnity
 			// truth; this records where it lives and which property names it
 			// actually uses, so an edit made in Blender can be written back onto
 			// the real material instead of a lossy reconstruction.
-			string sidecarPath = WriteMaterialSidecar(materials, exportedNames, Path.GetDirectoryName(outputPath));
+			//
+			// Named from the OBJ's own file name, per run. A fixed "materials.json"
+			// was the same shape of bug UniqueExportedName was written for one level
+			// up: the caller picks the output directory, and pi's staging root is
+			// ONE deterministic dir with no per-run subdirectory, so a second
+			// export into the same directory overwrote the first run's sidecar
+			// while BOTH responses reported the same materialSidecarPath. The first
+			// run's material mapping then silently became the second run's.
+			string sidecarName = Path.GetFileNameWithoutExtension(outputPath) + ".materials.json";
+			string sidecarPath = WriteMaterialSidecar(materials, exportedNames, Path.GetDirectoryName(outputPath), sidecarName);
 
 			Json result = new Json();
 			result.OpenObject();
@@ -389,7 +407,7 @@ namespace PiUnity
 		/// Records where each exported material came from and which property
 		/// names it actually uses, so an edit made in Blender can be applied to
 		/// the REAL material rather than a lossy reconstruction.
-		private static string WriteMaterialSidecar(List<Material> materials, List<string> exportedNames, string directory)
+		private static string WriteMaterialSidecar(List<Material> materials, List<string> exportedNames, string directory, string fileName)
 		{
 			// OpenArray() takes no key (PiUnity.Json.cs:242) -- only OpenObject
 			// does -- so the entries are collected first and attached as a value.
@@ -417,7 +435,10 @@ namespace PiUnity
 			sidecar.AddArray("materials", Json.Array(entries.ToArray()));
 			sidecar.CloseObject();
 
-			string path = Path.Combine(directory, "materials.json");
+			// Per-run file name, taken from the OBJ the caller asked for: see the
+		// collision the caller-side comment describes. A shared directory must
+		// not have two runs' sidecars fighting over one path.
+		string path = Path.Combine(directory, fileName);
 			File.WriteAllText(path, sidecar.ToString());
 			return path;
 		}
