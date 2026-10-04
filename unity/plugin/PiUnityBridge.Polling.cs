@@ -258,11 +258,25 @@ namespace PiUnity
 				if (File.Exists(target)) File.Delete(target);
 				File.Move(temp, target);
 			}
-			catch (Exception)
+			catch (Exception publishError)
 			{
 				// Rename-over is not supported on every filesystem we might land
 				// on, so fall back to a direct write rather than losing the reply.
-				try { File.WriteAllText(target, payload); } catch (Exception) { }
+				try
+				{
+					File.WriteAllText(target, payload);
+				}
+				catch (Exception fallbackError)
+				{
+					// Both writes failed. The request file was deleted when it was
+					// read (Poll, above), so there is no reply, no retry and no
+					// exception the caller can see: pi waits out its own timeout and
+					// reports a bridge that is simply not answering, which points
+					// at the wrong thing entirely. The only place left that can say
+					// what happened is the bridge's own log.
+					AppendLog("response write failed for " + requestId + ": " + fallbackError.Message
+						+ " (atomic publish first failed with: " + publishError.Message + ")");
+				}
 			}
 		}
 
@@ -284,9 +298,21 @@ namespace PiUnity
 				if (File.Exists(target)) File.Delete(target);
 				File.Move(temp, target);
 			}
-			catch (Exception)
+			catch (Exception publishError)
 			{
-				try { File.WriteAllText(target, payload); } catch (Exception) { }
+				try
+				{
+					File.WriteAllText(target, payload);
+				}
+				catch (Exception fallbackError)
+				{
+					// Same shape as WriteResponse above, and for the same reason: a
+					// swallowed write here loses a failure reply that was the only
+					// thing carrying the snippet's output, its diagnostics and its
+					// stack trace.
+					AppendLog("partial response write failed for " + requestId + ": " + fallbackError.Message
+						+ " (atomic publish first failed with: " + publishError.Message + ")");
+				}
 			}
 		}
 

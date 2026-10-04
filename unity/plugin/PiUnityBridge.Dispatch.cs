@@ -104,7 +104,24 @@ namespace PiUnity
 
 			List<CapturedLog> logs;
 			string log = CompileAndRun(code, out logs);
-			if (saveAfter) SaveScenes();
+			bool saveRequested = saveAfter;
+			bool saved = false;
+			if (saveAfter)
+			{
+				// Was the scene actually dirty? A successful run does not touch
+				// it: a read-only probe leaves it clean and SaveOpenScenes then
+				// has nothing to write. Reporting "saved" unconditionally put
+				// saved:true beside changed:false on every read-only call, which is
+				// two fields contradicting each other.
+				//
+				// What is reported is therefore the OUTCOME -- the scene carried
+				// unsaved work into the save, and that work reached disk. Both are
+				// taken as the pre-save state, so a save that fails afterwards
+				// (SaveScenes logs its own failure rather than throwing) is not
+				// over-claimed here.
+				saved = SceneManager.GetActiveScene().isDirty;
+				SaveScenes();
+			}
 
 			Json result = new Json();
 			result.OpenObject();
@@ -113,6 +130,11 @@ namespace PiUnity
 			result.AddNumber("exitCode", 0);
 			result.AddBool("changed", true);
 			result.AddString("label", label ?? "");
+			// The intent is kept under its own name, because it IS still the
+			// caller's decision and is what the request said. `saved` next to it
+			// is the answer to "did anything reach disk".
+			result.AddBool("saveRequested", saveRequested);
+			result.AddBool("saved", saved);
 			WriteLogArray(result, "logs", logs);
 			if (logTail)
 			{

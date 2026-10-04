@@ -233,11 +233,17 @@ namespace PiUnity
 			// make Unity import them. The destination is caller-chosen and the C#
 			// side has no idea where "scratch" is, so the only containment claim
 			// worth making here is the negative one that matters: it must NOT be
-			// inside Assets/. Normalised first, so ".." cannot hide the answer.
+			// inside Assets/. Both spellings are resolved against the project root,
+			// because pi passes an ABSOLUTE outputDir (getUnityTempDir, normally
+			// ~/.cache/pi-unity/tmp) and an absolute path is left alone by
+			// Path.Combine -- while a relative one would otherwise silently land
+			// inside the project. Normalised first, so ".." cannot hide the answer.
 			string stagingRoot;
 			try
 			{
-				stagingRoot = Path.GetFullPath(outputDir);
+				stagingRoot = Path.IsPathRooted(outputDir)
+					? Path.GetFullPath(outputDir)
+					: Path.GetFullPath(Path.Combine(ProjectRoot(), outputDir));
 			}
 			catch (Exception error)
 			{
@@ -272,6 +278,14 @@ namespace PiUnity
 			// destroyed. So the first claimant keeps the plain basename and a
 			// collision takes the source sub-path, flattened, which is unique for
 			// distinct asset paths.
+			//
+			// Deliberately per-RUN, not seeded from what is already on disk. The
+			// staging dir is a reused cache rather than a per-run mkdtemp, and
+			// seeding it with pre-existing names would rename the SAME export on
+			// every run ("Body.fbx", then "A-Body.fbx", then "A-Body.2.fbx"...)
+			// because last run's output would look like a collision. Re-running an
+			// identical export writes identical bytes to identical names, which is
+			// idempotent rather than accumulating.
 			var stagedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 			var copied = new List<string>();
 			var missing = new List<string>();

@@ -46,6 +46,16 @@ export interface ExecuteCSharpResult {
 	stderr: string;
 	exitCode: number;
 	changed: boolean;
+	/** Whether a scene save was REQUESTED -- the caller's `saveAfter` choice, resolved. */
+	saveRequested: boolean;
+	/**
+	 * Whether unsaved scene work actually reached disk.
+	 *
+	 * This is an outcome, not the intent: a read-only snippet leaves the scene
+	 * clean, so nothing was written and `saved` is false even when `saveAfter`
+	 * defaulted to true. Reading the intent out of this field is what made a
+	 * probe report `saved: true` beside `changed: false`.
+	 */
 	saved: boolean;
 	sourcePath: string;
 	checkpointPath?: string;
@@ -217,10 +227,13 @@ export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise
 	}
 
 	let result: import("./types.js").UnityExecuteResult;
+	// Resolved ONCE, so the field the result reports and the field the request
+	// sends cannot disagree about what "saveAfter" meant.
+	const saveRequested = options.saveAfter ?? true;
 	try {
 		result = await requestLiveUnityExecuteCSharp({
 			code,
-			saveAfter: options.saveAfter ?? true,
+			saveAfter: saveRequested,
 			label: `execute:${sourcePath}`,
 			logTail: options.logTail,
 			timeoutMs: (options.timeoutSeconds ?? 120) * 1000,
@@ -237,7 +250,11 @@ export async function unityExecuteCSharp(options: ExecuteCSharpOptions): Promise
 		stderr: result.stderr,
 		exitCode: result.exitCode,
 		changed: result.changed,
-		saved: options.saveAfter ?? true,
+		saveRequested,
+		// The bridge's own answer. Falling back to the intent is what this field
+		// used to do unconditionally: an older plugin, or one whose save failed,
+		// must not read as "saved" just because a save was asked for.
+		saved: result.saved ?? false,
 		sourcePath,
 		checkpointPath,
 		logs: result.logs,
