@@ -408,7 +408,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			saveAfter: Type.Optional(
 				Type.Boolean({
 					description:
-						"Save the open scene after the code runs. Defaults to true, which SUCCEEDING runs save unconditionally -- it does not diff the scene, so a read-only probe reports saved:true. Pass false when a script might only inspect, or when you want to decide after seeing its output.",
+						"Save the open scene after the code runs. Defaults to true. This asks for a save; it does not diff the scene, so a read-only snippet leaves nothing to write and the result says `saved: false`. The result carries BOTH: `saveRequested` is what you asked for, `saved` is whether unsaved scene work actually reached disk. Pass false when a script might only inspect, or when you want to decide after seeing its output.",
 					default: true,
 				}),
 			),
@@ -582,7 +582,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			outputDir: Type.Optional(
 				Type.String({
 					description:
-						'Required for mode:"export". The destination directory for the copied model files. Put it in a scratch/cache location, never inside the project.',
+						'Required for mode:"export". The destination directory for the copied model files. Put it in a scratch/cache location, never inside the project -- an outputDir that resolves inside Assets/ is REFUSED, because a model file there makes Unity import it as a new asset. Two source models whose files share a name are staged as "Body.fbx" and "A-Body.fbx" rather than one overwriting the other, and each entry\'s stagedPath is what was written.',
 				}),
 			),
 		}),
@@ -683,6 +683,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			"Reuse is RECURSIVE with no depth limit: a member may itself be a composite, so an island can hold a house that holds furniture, every level a nested prefab reference. Editing the chair prefab changes the chair in the house in the island. " +
 			"Each member is {prefabPath, name?, position?, rotation?, scale?}, where prefabPath is ASSET-RELATIVE and must be an actual PREFAB -- an FBX/OBJ is a model asset and is refused, because it is not something a composite can nest. " +
 			"The result re-reads the saved asset and reports nestedCount / isPrefabOfPrefabs, so a member that did not land as a reference is named rather than discovered later. " +
+			"At least one member is required: a composite of nothing is refused rather than saved as an empty prefab. " +
 			"Refuses to overwrite an existing composite: a composite is rebuilt from its members (delete it and compose again) because nothing it holds is not already in the members. " +
 			"Place the finished composite with unity_instantiate_prefab; edit a member with unity_set_property { space: \"asset\" } so the change reaches every composite that references it.",
 		parameters: Type.Object({
@@ -726,6 +727,9 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 			"READ-ONLY: it never mutates, never dirties or saves the scene, never writes an asset, and claims no iteration, so it is safe to call while a worker has a module mid-flight. " +
 			"What unity_scene_info cannot tell you: it reports only hasMesh/hasRenderer booleans per object, so a MIRRORED object (a negative scale component, which looks correct and has inverted normals and winding) is invisible there and is reported here as transform.mirrorScale. " +
 			"READ EVERY `state` FIELD before trusting a number -- several figures are approximations and say which: a skinned renderer's bounds volume can read much larger than the mesh at rest, the axis is derived from the mesh's LOCAL bounding box (exact only for an axis-aligned mesh), and a pair's 'inside' test is only meaningful on a CLOSED mesh. " +
+			"A SKINNED mesh is measured in its BIND POSE -- sharedMesh carried by the owner's transform, with no BakeMesh and no boneTransforms -- so on a posed avatar those numbers describe the model as bound, not how it stands now; the affected objects and pairs say BIND POSE. " +
+			"`closestSurfaceDistance` is ABSENT (with a `distanceState`) rather than 0 when no sample found a triangle to measure against: absent is not a claim of zero. " +
+			"The `topology` family is EXACT and uncapped: it walks every triangle of every named mesh on the main thread with no cancellation, so a heavy mesh holds the Editor for the duration. Its `costNote` says so. " +
 			"Omit `objects` to probe every active mesh root, which is usually right: a misplaced part is found by its relationship to the rest, and the culprit is often not yet known. `pairs` takes precedence over `objects` for that one family. " +
 			"An object name is resolved exactly -- a bare name two scene roots both contain is REFUSED, and a scene path (\"Chair (2)/Leg\") always works. A missing mesh, missing renderer or empty mesh is reported as a number with a `state`, never as an error.",
 		parameters: Type.Object({
