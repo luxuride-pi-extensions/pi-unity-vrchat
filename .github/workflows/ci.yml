@@ -45,30 +45,30 @@ jobs:
       # sibling checkouts can go beside it -- the layout resolver-copies and
       # allowlists look for, and the layout these four repos have in a working
       # directory.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-manager-core
           ref: master
           path: projects/pi-manager-core
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-blender
           ref: master
           path: projects/pi-blender
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: luxuride-pi-extensions/pi-unity-blender
           ref: master
           path: projects/pi-unity-blender
           token: ${{ secrets.CONSUMER_TOKEN }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -152,9 +152,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
