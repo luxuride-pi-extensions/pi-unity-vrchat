@@ -436,9 +436,9 @@ namespace PiUnity
 			sidecar.CloseObject();
 
 			// Per-run file name, taken from the OBJ the caller asked for: see the
-		// collision the caller-side comment describes. A shared directory must
-		// not have two runs' sidecars fighting over one path.
-		string path = Path.Combine(directory, fileName);
+			// collision the caller-side comment describes. A shared directory must
+			// not have two runs' sidecars fighting over one path.
+			string path = Path.Combine(directory, fileName);
 			File.WriteAllText(path, sidecar.ToString());
 			return path;
 		}
