@@ -322,7 +322,18 @@ export const requestLiveUnityWorld = (options: {
 			lightType: options.lightType,
 			range: options.range,
 			intensity: options.intensity,
-			color: options.color,
+			// The declared defaults are RE-APPLIED here rather than trusted to
+			// the schema. TypeBox `default` is metadata: it is shown to the model
+			// and is not applied on the way in, so an omitted colour crossed the
+			// bridge as undefined and the C# side's own fallback decided it. That
+			// is two places deciding what "default" means, and they are already
+			// kept in step by hand -- which is how they drift. Same idiom as
+			// unity/execute.ts's `saveAfter: options.saveAfter ?? true`.
+			//
+			// `size` has no default to re-apply: an omitted size means "keep the
+			// size the collider already had", and inventing one would change what
+			// an omitted argument does.
+			color: options.color ?? "ffffff",
 			tag: options.tag,
 			inactive: options.inactive,
 			object: options.object,
@@ -344,8 +355,10 @@ export const requestLiveUnityWorld = (options: {
 			size: options.size,
 			isTrigger: options.isTrigger,
 			clip: options.clip,
-			volume: options.volume,
-			spatial: options.spatial,
+			// Same reasoning as color above; these two are declared with a
+			// default in index.ts and re-applied here.
+			volume: options.volume ?? "1",
+			spatial: options.spatial ?? "0",
 			loop: options.loop,
 			loadType: options.loadType,
 		},

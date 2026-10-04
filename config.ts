@@ -15,7 +15,7 @@
 
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadManagerCore } from "./manager-core.js";
@@ -117,11 +117,47 @@ export function getUnityBridgeDir(): string {
 /**
  * Scratch dir for staging transfer payloads (FBX, textures, generated C#).
  * Kept out of the workspace so a failed import never leaves junk in Assets/.
+ *
+ * A PI_UNITY_TMP_DIR pointing into a Unity project's Assets/ is REFUSED, and
+ * the refusal is loud. The reason is not tidiness: every staged file here is a
+ * real asset the moment it lands under Assets/ -- Unity imports it, and an
+ * inlineCode snippet compiles a SECOND time into the user's Assembly-CSharp on
+ * the next refresh, silently. The default (~/.cache/pi-unity/tmp) cannot do
+ * this, so the check is exactly about the override: without it the one
+ * configuration that causes the damage is the one that is accepted.
+ *
+ * Detection is deliberately structural rather than "is this a known project":
+ * a path is refused when it is, or is under, any directory segment named
+ * `Assets`. That catches the project itself, a subfolder of it, and the
+ * symlink-resolved form, without needing a list of project roots that would be
+ * incomplete by construction.
  */
 export function getUnityTempDir(): string {
-	const dir = expandUserPath(process.env[ENV_UNITY_TMP_DIR]?.trim() || join(xdgCacheHome(), "pi-unity", "tmp"));
+	const configured = process.env[ENV_UNITY_TMP_DIR]?.trim();
+	const dir = expandUserPath(configured || join(xdgCacheHome(), "pi-unity", "tmp"));
+	if (configured) assertNotInsideAssets(dir, ENV_UNITY_TMP_DIR);
 	mkdirSync(dir, { recursive: true });
 	return dir;
+}
+
+/**
+ * Refuses a scratch path that is inside a Unity project's Assets/.
+ *
+ * The check is on RESOLVED segments, so `Assets/../Assets/x` and
+ * `AssetsEvil/x` are told apart correctly: only a whole segment named `Assets`
+ * counts, which is what makes a sibling directory with the same prefix safe to
+ * use and the folder itself not.
+ */
+export function assertNotInsideAssets(dir: string, source: string): void {
+	const segments = resolve(dir).split(sep).filter((segment) => segment.length > 0);
+	const at = segments.indexOf("Assets");
+	if (at < 0) return;
+	throw new Error(
+		`${source} is set to ${dir}, which is inside a Unity project's Assets/ folder (at "${segments.slice(0, at + 1).join(sep)}"). ` +
+			"Every file staged there is imported by Unity as a project asset, and a staged C# snippet compiles a second " +
+			"time into your Assembly-CSharp on the next refresh. Point it at a scratch or cache directory outside " +
+			"any project (unset it to use the default cache dir).",
+	);
 }
 
 export function getUnityHubPath(): string {

@@ -705,7 +705,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 					rotation: Type.Optional(Type.String({ description: 'LOCAL rotation in Euler DEGREES as "x,y,z". Default "0,0,0".' })),
 					scale: Type.Optional(Type.String({ description: 'LOCAL scale as "x,y,z". Default "1,1,1".' })),
 				}),
-				{ description: "The prefabs this part-of-the-world is made of, in placement order. Each may itself be a composite." },
+				{ description: "The prefabs this part-of-the-world is made of, in placement order. Each may itself be a composite.", minItems: 1 },
 			),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {

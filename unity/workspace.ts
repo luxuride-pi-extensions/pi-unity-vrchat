@@ -8,7 +8,7 @@
  * the module runner needs to be able to revert.
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { getBundledUnityBridgeDir, getUnityTempDir } from "../config.js";
@@ -265,8 +265,69 @@ export function installBridgeIntoProject(projectPath: string, bridgeDir: string)
 	writeFileSync(join(projectPath, BRIDGE_DIR_MARKER_FILE), `${bridgeDir}\n`, "utf8");
 }
 
+/**
+ * A staged snippet's file name is `<prefix>-<epochMs>-<rand>.cs`, and NOTHING
+ * removes it: one file accumulated per inlineCode call, forever.
+ *
+ * A scratch snippet is disposable by construction -- the code is also held in
+ * the caller's hands, and the path is reported only so the caller can name it
+ * -- so the bound is an age, not a liveness check, and it is applied when a
+ * NEW one is staged rather than on a timer (there is no daemon here to hold a
+ * timer, and the tool only runs when pi asks it to).
+ *
+ * The age is generous on purpose. The Editor reads the file once, at dispatch,
+ * so anything younger than this could still be in flight on a slow run, and
+ * deleting a snippet the Editor has not read yet turns a working call into a
+ * "file not found". Past the bound the file has no reader left.
+ *
+ * Bounded by count as well as age, so a caller that never returns cannot grow
+ * the directory without limit even inside one session, and so a burst of
+ * snippets is cleaned up long before it is old.
+ */
+const SCRATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SCRATCH_MAX_FILES = 200;
+const SCRATCH_RE = /\.cs$/;
+
+function pruneScratchFiles(dir: string, now: number): void {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return; // No dir yet: staging creates it.
+	}
+
+	const stale: { name: string; mtimeMs: number }[] = [];
+	for (const name of entries) {
+		if (!SCRATCH_RE.test(name)) continue;
+		try {
+			const mtimeMs = statSync(join(dir, name)).mtimeMs;
+			// The age bound.
+			if (now - mtimeMs > SCRATCH_MAX_AGE_MS) stale.push({ name, mtimeMs });
+			else if (entries.length > SCRATCH_MAX_FILES) stale.push({ name, mtimeMs });
+		} catch {
+			// Unreadable entry: leave it. A prune that cannot stat a file is not
+			// evidence the file is disposable.
+		}
+	}
+	if (stale.length === 0) return;
+
+	// Oldest first, so the count bound drops the stalest rather than whichever
+	// happened to be listed first.
+	stale.sort((a, b) => a.mtimeMs - b.mtimeMs);
+	for (const entry of stale) {
+		try {
+			rmSync(join(dir, entry.name), { force: true });
+		} catch {
+			// Best-effort: a leftover scratch file is junk, not a failure worth
+			// refusing the caller's own snippet over.
+		}
+	}
+}
+
 export function stageScratchFile(prefix: string, contents: string): string {
-	const path = join(getUnityTempDir(), `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.cs`);
+	const dir = getUnityTempDir();
+	pruneScratchFiles(dir, Date.now());
+	const path = join(dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.cs`);
 	writeFileSync(path, contents, "utf8");
 	return path;
 }
