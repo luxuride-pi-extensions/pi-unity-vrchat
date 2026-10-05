@@ -2,7 +2,24 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    # NOT `[master]`, and the reason is a run that never happened: master was
+    # the only push trigger, so every push to a branch under development
+    # produced no run at all, and a branch nobody ever checks CI against
+    # cannot have a failing check either. The list is `git branch -a`, minus
+    # no entries of its own -- one comment per branch so that tidying it back
+    # to `[master]` reads as deleting the reason rather than as tidying.
+    branches:
+      # the default branch, and the only one release.yml can cut a tag from
+      - master
+      # the packaging branch the whole suite's packaging/`files` work lives on
+      - feat/packaging
+      # the checkout-order branch: fixes to the sibling-checkout sequence that
+      # `test` depends on, which is exactly the branch whose CI must run
+      - fix/ci-checkout-order
+      # this lane's branch: CI/release findings for the suite
+      - fix/review-findings
+      # the GitHub Actions lane that wrote the workflows these branches run
+      - ci/github-actions
   pull_request:
   workflow_dispatch:
 
@@ -10,21 +27,126 @@ permissions:
   contents: read
 
 jobs:
-  # There is no token-free job in this repository, which is a property of the
-  # suite rather than an omission.
+  # Everything that CAN run without a private-sibling token, always.
   #
-  # index.ts calls loadManagerCore() at module scope, and
-  # test/run-bridge-tests.mjs imports index.ts directly. So the moment the
-  # suite loads this extension at all it needs pi-manager-core's source on
-  # disk, and without it the run dies at import with
+  # This job exists because the finding that produced it was a workflow that
+  # reported SUCCESS having executed zero jobs: `test` below is gated on
+  # `vars.CONSUMER_REPOS_ENABLED`, that variable has never been set, and
+  # nothing had ever run in this repository at all. A job that needs a secret
+  # must not be the ONLY job, because the shape of a skipped job and the shape
+  # of a passing one are the same colour.
+  #
+  # These three checks need no sibling checkout and no CONSUMER_TOKEN. That is
+  # not an assumption, it is what a bare `git clone && npm ci` was run against:
+  #
+  #   * `npm run typecheck` -- clean on a bare checkout.
+  #   * `node test/plugin-invariants.mjs` -- 32 checks over unity/plugin's C#,
+  #     the only test file in test/ that does not import index.ts.
+  #   * `npm pack --dry-run` -- reads package.json and packs the working tree;
+  #     no dependencies, no network, no siblings.
+  #
+  # What still needs the core, and is therefore NOT here: index.ts calls
+  # loadManagerCore() at module scope, and nine of the ten files in test/
+  # import index.ts (directly, or through config.ts / unity/bridge.ts). On a
+  # bare checkout all nine die at import with
   #
   #   Error: manager-core could not be found. Looked in: pi's installed
   #   extensions dir (...); a sibling checkout of manager-core; a sibling
   #   checkout of pi-manager-core.
   #
-  # before a single check runs. Splitting the suite so a "unit" job could
-  # report some passing subset would be a green light for a suite that has not
-  # been run.
+  # so they belong in `test` below, where the checkouts they need exist.
+  bare-checks:
+    name: typecheck, plugin invariants, and tarball contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # --legacy-peer-deps for the same reason as in `test` below: every repo
+      # here declares peerDependencies: { "pi-manager-core": "*" }, which is
+      # the documented shape for a Pi package -- loaded from the extensions
+      # directory, not installed from the registry -- and plain `npm ci` fails
+      # with 404 on a package that was never published.
+      - run: npm ci --legacy-peer-deps
+
+      - run: npm run typecheck
+
+      - name: plugin invariants
+        run: node test/plugin-invariants.mjs
+
+      # The tarball's contents, asserted here rather than only at release time.
+      #
+      # release.yml:114-144 checks that each `pkg.pi.extensions` entry is
+      # present and that no test/ or .github/ is, but pi also loads whole
+      # DIRECTORIES: this extension ships `core/`, `scripts/` and `unity/`,
+      # and index.ts publishes `unity/skills/` through a resources_discover
+      # hook returning an ABSOLUTE path into the repo. A `files` allowlist that
+      # dropped one of those yields a tarball whose skill list points at files
+      # that are not in it, with no error at install time.
+      #
+      # That assertion exists as ALWAYS_SHIP and SKILL_DIRS in
+      # pi-manager-core/test/package-contents.mjs, but that check needs all
+      # FOUR repositories checked out and only runs with PI_REQUIRE_PACKAGES=1.
+      # This is the same assertion for THIS repository alone, so it runs on
+      # every push with no token and no siblings.
+      - name: the tarball ships what pi loads
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const fs = require("node:fs");
+            const pkg = require("./package.json");
+            const packed = JSON.parse(fs.readFileSync("pack.json", "utf8"));
+            // npm keys the payload by package name, and older npm returns an
+            // array. Read both shapes rather than assume this npm.
+            const p = Array.isArray(packed) ? packed[0] : packed[pkg.name];
+            if (!p) {
+              const e = `npm pack --json returned no entry for ${pkg.name}`;
+              throw new Error(e);
+            }
+            const paths = p.files.map((f) => f.path);
+            const missing = [];
+            const declared = pkg.pi?.extensions;
+            const entries = Array.isArray(declared) && declared.length
+              ? declared : ["index.ts"];
+            for (const e of entries) {
+              const rel = e.replace(/^\.\//, "");
+              if (!paths.includes(rel)) missing.push(`extension entry ${rel}`);
+            }
+            // Directories pi imports or publishes, each only if it exists on
+            // disk -- so adding a directory to the repo and not to `files`
+            // fails here, and a rename does not have to update this list.
+            for (const d of ["core/", "scripts/", "unity/", "unity/skills/"]) {
+              if (!fs.existsSync(d)) continue;
+              if (paths.some((x) => x.startsWith(d))) continue;
+              missing.push(`${d} (exists on disk, ships nothing)`);
+            }
+            for (const bad of ["test/", ".github/"]) {
+              const shipped = paths.filter((x) => x.startsWith(bad));
+              if (!shipped.length) continue;
+              missing.push(
+                `${shipped.length} file(s) under ${bad}, e.g. ${shipped[0]}`,
+              );
+            }
+            if (missing.length) {
+              console.error(
+                "The tarball is not shippable:\n  - " + missing.join("\n  - "),
+              );
+              process.exit(1);
+            }
+            console.log(
+              `ok ${p.entryCount} files, ${p.unpackedSize} bytes unpacked`,
+            );
+          '
+          rm -f pack.json
+
+  # There is no token-free path to the rest of this repository's suite, which
+  # is a property of the suite rather than an omission. See `bare-checks`
+  # above for exactly which files need what.
   test:
     name: unit tests, typecheck, and manager-core consistency
     # pi-manager-core, pi-blender and pi-unity-blender are separate PRIVATE
@@ -124,10 +246,12 @@ jobs:
         run: |
           agent="$RUNNER_TEMP/agent-dir/extensions"
           mkdir -p "$agent"
-          ln -s "$GITHUB_WORKSPACE"                        "$agent/pi-unity"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"    "$agent/pi-blender"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender" "$agent/unity-blender"
-          ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core" "$agent/manager-core"
+          ln -s "$GITHUB_WORKSPACE"                          "$agent/pi-unity"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-blender"      "$agent/pi-blender"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender" \
+            "$agent/unity-blender"
+          ln -s "$GITHUB_WORKSPACE/projects/pi-manager-core" \
+            "$agent/manager-core"
 
       - name: typecheck and test
         env:
@@ -154,9 +278,96 @@ jobs:
       - name: cross-repo consistency checks
         working-directory: projects/pi-manager-core
         run: |
-          for check in resolver-copies allowlists dependency-declaration agent-rosters; do
+          for check in resolver-copies allowlists dependency-declaration \
+                       agent-rosters; do
             echo "==> $check"
             node test/$check.mjs
+          done
+
+  # The watchdog. This job runs on EVERY event, and it fails if the `test` job
+  # above did not run.
+  #
+  # Why it has to exist: `test` is gated on vars.CONSUMER_REPOS_ENABLED, which
+  # has never been set, and a gated job is reported as SKIPPED -- which in the
+  # Actions UI is the same neutral colour as SUCCESS. With `test` as the only
+  # job, the workflow reported SUCCESS having verified nothing at all, and
+  # nothing on the run page distinguished that from a passing build. That is
+  # the single most dangerous failure mode in this suite, and it is the one
+  # this job is here to make impossible.
+  #
+  # So the property this workflow now guarantees is:
+  #
+  #   the checks run, or the workflow is red.
+  #
+  # There is deliberately no escape hatch here. A flag that turned this job off
+  # would restore exactly the green-with-nothing-verified outcome this exists
+  # to prevent, so the only way to a green run is to make the gate true.
+  sibling-checkouts:
+    name: the gated suite must not be skipped
+    # `needs` so the result of `test` is available, and `always()` so this job
+    # is not itself skipped by `test` failing -- that is the case where the
+    # answer is already known, and this job is reporting it.
+    needs: test
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if the gated suite was skipped
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          GATE: ${{ vars.CONSUMER_REPOS_ENABLED }}
+          HAS_TOKEN: ${{ secrets.CONSUMER_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$TEST_RESULT" = "skipped" ]; then
+            echo "::error::the 'test' job was SKIPPED, so no test in this" \
+              "repository ran. A skipped job is reported in the same neutral" \
+              "colour as a passing one, so this run must not be read as green."
+            echo
+            echo "The gate is vars.CONSUMER_REPOS_ENABLED, currently" \
+              "'${GATE}'."
+            echo "This job needs a token with read access to the org," \
+              "because pi-manager-core, pi-blender and pi-unity-blender are" \
+              "PRIVATE and GITHUB_TOKEN cannot read a private repository" \
+              "even in the same org."
+            echo
+            echo "HAS_TOKEN: ${HAS_TOKEN}"
+            echo
+            echo "To fix, both of these are needed:"
+            echo "  1. a repository secret CONSUMER_TOKEN with read access"
+            echo "     (Settings -> Secrets -> Actions -> New repository" \
+              "secret)"
+            echo "  2. a repository VARIABLE CONSUMER_REPOS_ENABLED=1" \
+              "(Settings -> Secrets and variables -> Actions ->" \
+              "Variables -> New repository variable)"
+            echo
+            echo "Until then 'bare-checks' above is the whole suite:" \
+              "typecheck, plugin invariants and tarball contents. That is" \
+              "real coverage, but it is not the nine of ten test files that" \
+              "import index.ts, which need pi-manager-core's source on disk."
+            exit 1
+          fi
+          echo "the 'test' job reported '$TEST_RESULT', which is not a skip"
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # Only reached when `test` actually ran, so the secret it needed is
+      # present. Listing the siblings here means a run that verified them is
+      # also a run that says what it verified.
+      - name: which private repositories this run could read
+        env:
+          GH_TOKEN: ${{ secrets.CONSUMER_TOKEN }}
+        run: |
+          for repo in pi-manager-core pi-blender pi-unity-blender; do
+            if out="$(gh api "repos/luxuride-pi-extensions/$repo" \
+                --jq "\"$repo: \\(.visibility)\"" 2>&1)"; then
+              echo "$out"
+            else
+              echo "$repo: NOT READABLE with CONSUMER_TOKEN: $out"
+            fi
           done
 
   # Deliberately manual. These need a Unity Editor install and a licence
