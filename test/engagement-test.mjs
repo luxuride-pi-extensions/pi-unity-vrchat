@@ -78,7 +78,7 @@ async function loadExtension(spec) {
 	await (mod.default ?? mod)(pi);
 
 	const findAll = (name) => events.filter((e) => e.event === name).map((e) => e.handler);
-	return { tools, commands, beforeAgentStarts: findAll("before_agent_start"), sessionStart: findAll("session_start")[0] };
+	return { tools, commands, beforeAgentStarts: findAll("before_agent_start"), sessionStarts: findAll("session_start") };
 }
 
 /**
@@ -118,13 +118,13 @@ async function injected(pi) {
 for (const spec of EXTENSIONS) {
 	console.log(spec.label);
 	const pi = await loadExtension(spec);
-	const { tools, commands, sessionStart } = pi;
+	const { tools, commands, sessionStarts } = pi;
 
 	// Registration is the precondition for every behaviour below.
 	check(`registers /${spec.command}`, commands.has(spec.command));
 	check(`registers ${spec.tool}`, tools.some((t) => t.name === spec.tool));
 	check("has a before_agent_start handler", pi.beforeAgentStarts.length > 0);
-	check("has a session_start handler", typeof sessionStart === "function");
+	check("has a session_start handler", sessionStarts.length > 0);
 
 	// Silence means BOTH halves quiet: no returned message AND no system-prompt
 	// section written. A handler that injects a section returns undefined, so
@@ -136,7 +136,7 @@ for (const spec of EXTENSIONS) {
 	};
 
 	// A fresh session injects nothing, and stays quiet across idle turns.
-	sessionStart?.();
+	sessionStarts.forEach((h) => h?.());
 	check("fresh session: no injection", await silentResult(pi));
 	check("idle turn: still no injection", await silentResult(pi));
 
@@ -164,7 +164,7 @@ for (const spec of EXTENSIONS) {
 	);
 
 	// A new session silences it again -- that is the "not in fresh session" part.
-	sessionStart?.();
+	sessionStarts.forEach((h) => h?.());
 	check("new session: silent again", await silentResult(pi));
 
 	// EVERY tool must engage, not just one. Checking a single tool is what let
@@ -174,7 +174,7 @@ for (const spec of EXTENSIONS) {
 	// the thing that turns injection on.
 	const silent = [];
 	for (const tool of tools) {
-		sessionStart?.();
+		sessionStarts.forEach((h) => h?.());
 		try {
 			await tool.execute({}, undefined);
 		} catch {
