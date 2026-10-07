@@ -159,6 +159,44 @@ const UNITY_MANAGER_ROSTER = new Set([
  * are attached here as a policy callback: they name a Unity worker and a Unity
  * critic, so they cannot live in a file that does not know about Unity.
  */
+/**
+ * The unity_* family, registered inert and declared to the model only when
+ * this session shows it needs them: /unity engage, or a first call. Every
+ * registerTool above passes defaultActive:false, and this is the list of the
+ * same names — one family, activated together.
+ */
+const LAZY_UNITY_TOOL_NAMES = [
+	"unity_workspace_init",
+	"unity_execute_csharp",
+	"unity_session_context",
+	"unity_scene_info",
+	"unity_bones",
+	"unity_source_models",
+	"unity_prefab_info",
+	"unity_instantiate_prefab",
+	"unity_compose_prefab",
+	"unity_geometry_probe",
+	"unity_inspect",
+	"unity_set_property",
+	"unity_set_transform",
+	"unity_vrc",
+	"unity_world",
+	"unity_save_view",
+	"unity_render",
+	"unity_capture_view",
+	"unity_module_run",
+	"unity_module_revert",
+	"unity_set_tool",
+	"unity_log_critique",
+	"unity_bridge_status",
+	"unity_await_compile",
+];
+
+const lazyTools = core.createLazyToolGate({
+	toolNames: LAZY_UNITY_TOOL_NAMES,
+	isEngaged: () => managerMode.isEngaged(),
+});
+
 const managerMode = core.createManagerMode({
 	allowedTools: [
 		// Delegation, supervision, and the two halves of waiting: bg_wait
@@ -330,6 +368,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 
 export default function piUnityExtension(pi: ExtensionAPI) {
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_workspace_init",
 		label: "Unity Workspace Init",
 		description:
@@ -384,6 +423,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_execute_csharp",
 		label: "Unity Execute C#",
 		description:
@@ -452,6 +492,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_session_context",
 		label: "Unity Session Context",
 		description:
@@ -474,6 +515,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_scene_info",
 		label: "Unity Scene Info",
 		description:
@@ -510,6 +552,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_bones",
 		label: "Unity Bones",
 		description:
@@ -554,6 +597,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_source_models",
 		label: "Unity Source Models",
 		description:
@@ -606,6 +650,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_prefab_info",
 		label: "Unity Prefab Info",
 		description:
@@ -629,6 +674,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_instantiate_prefab",
 		label: "Unity Instantiate Prefab",
 		description:
@@ -674,6 +720,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_compose_prefab",
 		label: "Unity Compose Prefab",
 		description:
@@ -719,6 +766,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_geometry_probe",
 		label: "Unity Geometry Probe",
 		description:
@@ -801,6 +849,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_inspect",
 		label: "Unity Inspect",
 		description:
@@ -839,6 +888,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_set_property",
 		label: "Unity Set Property",
 		description:
@@ -880,6 +930,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_set_transform",
 		label: "Unity Set Transform",
 		description:
@@ -922,6 +973,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_vrc",
 		label: "Unity VRChat (avatar)",
 		description:
@@ -977,6 +1029,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_world",
 		label: "Unity VRChat (world)",
 		description:
@@ -1239,6 +1292,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_save_view",
 		label: "Unity Save View",
 		description:
@@ -1270,6 +1324,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_render",
 		label: "Unity Render",
 		description:
@@ -1310,6 +1365,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_capture_view",
 		label: "Unity Capture View",
 		description:
@@ -1348,6 +1404,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_module_run",
 		label: "Unity Module Run",
 		description:
@@ -1391,6 +1448,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_module_revert",
 		label: "Unity Module Revert",
 		description:
@@ -1431,6 +1489,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_set_tool",
 		label: "Unity Set Tool",
 		description: `Set the active transform tool in the live Unity Editor: ${UNITY_TOOLS.join(", ")}.`,
@@ -1450,6 +1509,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_log_critique",
 		label: "Unity Log Critique",
 		description:
@@ -1497,6 +1557,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_bridge_status",
 		label: "Unity Bridge Status",
 		description:
@@ -1520,6 +1581,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
+		defaultActive: false,
 		name: "unity_await_compile",
 		label: "Unity Await Compile",
 		description:
@@ -1558,6 +1620,9 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	// session and keeps it — see createManagerMode's reset().
 	pi.on("session_start", (event) => {
 		managerMode.reset(event?.reason);
+		// Same reset semantics as the gate: a reload keeps an activated
+		// family, a fresh session starts inert.
+		lazyTools.reset(event?.reason);
 	});
 
 	// The gate itself. This line was MISSING while the extension already
@@ -1567,6 +1632,7 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 	// test/extension-registration.mjs, which now checks that every manager
 	// actually registers a tool_call handler.
 	managerMode.install(pi);
+	lazyTools.install(pi);
 
 	// The command registration, the argument handling and the deliverAs choice
 	// are the shared core's: all three manager extensions send the user's text
@@ -1578,6 +1644,10 @@ export default function piUnityExtension(pi: ExtensionAPI) {
 		engagedMessage: "Unity engaged — this session is the manager.",
 		onEngage: () => {
 			managerMode.markEngaged();
+			// The engage command runs outside a turn, so the family must be
+			// declared here rather than waiting for the before_agent_start
+			// re-arm.
+			lazyTools.activate(pi);
 			// Deliberately NO launch here. Engaging a session says nothing about
 			// which project to open — there is no project, no manifest and no
 			// workspace yet — so the only thing a launch could do is open an
