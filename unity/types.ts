@@ -36,6 +36,17 @@ export interface UnityExecuteResult {
 	stderr: string;
 	exitCode: number;
 	changed: boolean;
+	/**
+	 * Whether a scene save was requested (the resolved `saveAfter`). The
+	 * caller's intent, kept separate from the outcome below.
+	 */
+	saveRequested?: boolean;
+	/**
+	 * Whether unsaved scene work actually reached disk. False for a read-only
+	 * run even when a save was requested, so intent and outcome cannot be read
+	 * off the same field.
+	 */
+	saved?: boolean;
 	label: string;
 	/** Debug.Log lines captured during the snippet, in order. */
 	logs?: UnityExecuteLogEntry[];

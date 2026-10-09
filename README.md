@@ -206,18 +206,18 @@ build that skipped your code.
 | Tool | Does |
 | --- | --- |
 | `unity_workspace_init` | Create a generated project, or **adopt an existing project in place**. Opens it in the Editor. |
-| `unity_execute_csharp` | Run C# in the live Editor from `script.cs` or inline. `saveBefore` / `saveAfter`, `logTail`. Returns `logs: [{level, message, stack}]` for anything the snippet `Debug.Log`ged, plus `diagnostics` and `stackTrace` when it fails. |
+| `unity_execute_csharp` | Run C# in the live Editor from `script.cs` or inline. `saveBefore` / `saveAfter`, `logTail`. Returns `saveRequested` (what you asked for) beside `saved` (whether unsaved scene work actually reached disk), `logs: [{level, message, stack}]` for anything the snippet `Debug.Log`ged, plus `diagnostics` and `stackTrace` when it fails. |
 | `unity_session_context` | Live state: open scene, selection, active transform tool, viewport. |
 | `unity_scene_info` | Structured read-only inspection by category. Objects carry world + local position, rotation, and scale. |
 | `unity_bones` | Where a **bone** is. `humanoidBones` by `HumanBodyBones` name, plus the full rig by transform path. |
 | `unity_inspect` | Read a component's **serialized properties** — what the Inspector shows, for any component including VRChat/lilToon/VRCFury. |
 | `unity_set_property` | Write one serialized property, parsed by the property's own type. Undoable. |
 | `unity_set_transform` | Move / rotate / scale a GameObject or a rig bone, in world or local space. Undoable. |
-| `unity_source_models` | Which real model **files** a selection resolves to. `find` reports, `export` copies them out for another application to open verbatim. |
+| `unity_source_models` | Which real model **files** a selection resolves to. `find` reports, `export` copies them out for another application to open verbatim — refusing an `outputDir` inside `Assets/`, and disambiguating two sources whose files share a name. |
 | `unity_prefab_info` | What a prefab **asset** contains — children, materials, bounds — read without instantiating it. |
 | `unity_instantiate_prefab` | Place a prefab asset into the scene, positioned, in one call. Returns the instance's scene path. |
 | `unity_compose_prefab` | Build ONE part-of-the-world prefab whose members are **nested prefab instances** — never merged geometry. Members may themselves be composites, to any depth. Refuses to overwrite an existing composite. |
-| `unity_geometry_probe` | **Measure** the scene: world bounds, thin/long axis vs an expected axis, closest-surface distance and interpenetration between a pair, non-manifold/loose/duplicate counts. Read-only, and the Unity counterpart to `blender_geometry_probe`. |
+| `unity_geometry_probe` | **Measure** the scene: world bounds, thin/long axis vs an expected axis, closest-surface distance and interpenetration between a pair, non-manifold/loose/duplicate counts. Read-only, and the Unity counterpart to `blender_geometry_probe`. Read every `state`: a skinned mesh is measured in **bind pose**, `closestSurfaceDistance` is absent rather than `0` when nothing could be measured, and the `topology` walk is exact and uncapped. |
 | `unity_vrc` | **VRChat avatar** helpers: package/optimizer readiness, VRCFury, lilToon, bone paths. |
 | `unity_world` | **VRChat world** helpers: scene descriptor, Udon inventory, light volumes, build/upload checks, AudioLink / Yama Stream / VRChat Hand Menu, VRWorld Toolkit, EasyQuestSwitch, plus authoring for materials, spawn points, colliders/triggers and audio. 37 actions — `world action=actions` lists them. |
 | `unity_render` | Render through a **camera** with the real lighting and materials. |

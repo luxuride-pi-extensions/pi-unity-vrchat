@@ -176,5 +176,66 @@ namespace PiUnity
 		{
 			return Directory.GetParent(Application.dataPath).FullName;
 		}
+
+		/// Turns a caller-supplied "Assets/..." folder into the absolute path
+		/// inside the open project, or refuses.
+		///
+		/// A bare `StartsWith("Assets")` is not containment. It passes
+		/// "AssetsEvil/x" -- a directory next to Assets/, not inside it -- and it
+		/// passes "Assets/../../elsewhere", which Path.Combine then resolves into
+		/// a folder outside the project entirely. Either one turned a path check
+		/// into a write anywhere on the disk the Editor can reach.
+		///
+		/// So the path is NORMALISED first (GetFullPath collapses "." and ".."
+		/// against the real filesystem rules), and only then compared: the result
+		/// must be under ProjectRoot() AND must begin with "Assets" followed by a
+		/// directory separator, so Assets/ itself and Assets/Foo are accepted
+		/// while AssetsEvil, and anything that climbed out of the project, are
+		/// not.
+		private static string ResolveAssetsFolder(string folder)
+		{
+			string trimmed = (folder ?? "").Trim();
+			if (trimmed.Length == 0)
+			{
+				throw new Exception(
+					"A destination folder inside Assets/ is required. Pass an asset-relative path such as " +
+					"\"Assets/Models\", not an absolute one and not an empty string."
+				);
+			}
+			if (Path.IsPathRooted(trimmed))
+			{
+				throw new Exception(
+					"Destination \"" + trimmed + "\" is an absolute path. Pass an ASSET-RELATIVE path inside " +
+					"Assets/, e.g. \"Assets/Models\" -- the project's own root is added for you."
+				);
+			}
+
+			string projectRoot = Path.GetFullPath(ProjectRoot());
+			string absolute;
+			try
+			{
+				absolute = Path.GetFullPath(Path.Combine(projectRoot, trimmed));
+			}
+			catch (Exception error)
+			{
+				throw new Exception("Destination \"" + trimmed + "\" is not a usable path: " + error.Message);
+			}
+
+			string assetsRoot = Path.Combine(projectRoot, "Assets");
+			bool underProject = absolute.Equals(projectRoot, StringComparison.Ordinal)
+				|| absolute.StartsWith(projectRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+			bool insideAssets = absolute.Equals(assetsRoot, StringComparison.Ordinal)
+				|| absolute.StartsWith(assetsRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+
+			if (!underProject || !insideAssets)
+			{
+				throw new Exception(
+					"Destination \"" + trimmed + "\" resolves outside this project's Assets/ folder (\""
+					+ absolute + "\"). Pass an asset-relative path inside Assets/, e.g. \"Assets/Models\" -- " +
+					"\"Assets/..\" and a sibling such as \"AssetsEvil\" are refused rather than written to."
+				);
+			}
+			return absolute;
+		}
 	}
 }

@@ -66,8 +66,12 @@ namespace PiUnity
 		public readonly List<Vector3> samples = new List<Vector3>();
 		public Vector3 WorldMin;
 		public Vector3 WorldMax;
+		/// True when the figures came from a skinned mesh's rest pose rather than
+		/// the scene's current pose. Carried as a flag as well as in State so a
+		/// caller reading the pair's own `state` does not have to parse prose.
+		public bool BindPose;
 
-		public static ProbeSurface Build(Transform owner, Mesh mesh, int vertexLimit, int triangleLimit)
+		public static ProbeSurface Build(Transform owner, Mesh mesh, int vertexLimit, int triangleLimit, string poseNote)
 		{
 			var surface = new ProbeSurface();
 			if (mesh == null)
@@ -166,10 +170,32 @@ namespace PiUnity
 			}
 
 			surface.Available = true;
-			surface.State = surface.triangles.Length / 3 < triangleCount
-				? "closest-point figures use " + (surface.triangles.Length / 3) + " of " + triangleCount
-					+ " triangles, evenly strided, so a gap thinner than the stride can read larger than it is"
-				: "world-space triangles, full triangle set";
+			// The strided case is the one worth naming. The full-set case was the
+			// default and was WRONG for a mesh with no triangles at all: 0 of 0
+			// sampled is 0, so `0 < 0` is false and a surface that has vertices but
+			// no faces was labelled "full triangle set". There is no surface to
+			// measure a distance to, and every closest-point query against it
+			// fails -- which is exactly the state that has to be legible.
+			if (surface.triangles.Length == 0)
+			{
+				surface.State = "mesh has " + world.Length + " vertices but no triangles, so there is no surface to "
+					+ "measure a distance against; every closest-point sample on this object is unsampled";
+			}
+			else
+			{
+				surface.State = surface.triangles.Length / 3 < triangleCount
+					? "closest-point figures use " + (surface.triangles.Length / 3) + " of " + triangleCount
+						+ " triangles, evenly strided, so a gap thinner than the stride can read larger than it is"
+					: "world-space triangles, full triangle set";
+			}
+			// The pose note is appended rather than replacing the above: the
+			// sampling stride and the bind-pose caveat are independent, and both
+			// have to survive to the caller.
+			if (!string.IsNullOrEmpty(poseNote))
+			{
+				surface.State = surface.State + ". " + poseNote;
+				surface.BindPose = true;
+			}
 			return surface;
 		}
 
@@ -410,8 +436,12 @@ namespace PiUnity
 			result.AddString("unitNote", "Unity units: 1.0 = 1 metre, so every distance is metres.");
 
 			// The surface cache is built once per probed object and shared by
-			// the object, shape and pair families. Rebuilding it per family
-			// would re-read and re-transform the same vertices up to four times.
+			// the shape and pair families. Building it per family would re-read and
+			// re-transform the same vertices up to four times, and did twice: the
+			// default probe (`objects` omitted, so every family runs) had the pair
+			// family build one and convexity build another for the SAME object.
+			// One build, one transform, shared by both.
+			bool wantsSurface = requested.Contains("pair") || requested.Contains("shape");
 			var surfaces = new Dictionary<string, ProbeSurface>(StringComparer.Ordinal);
 
 			Json objects = new Json();
@@ -423,18 +453,19 @@ namespace PiUnity
 				entry.OpenObject();
 				entry.AddString("name", target.name);
 				entry.AddString("path", path);
-				DescribeProbeMeshSource(target, entry, out Transform meshTransform, out Mesh mesh);
+				DescribeProbeMeshSource(target, entry, out Transform meshTransform, out Mesh mesh, out string poseNote);
+
+				if (wantsSurface && !surfaces.ContainsKey(path))
+				{
+					surfaces[path] = ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit, poseNote);
+				}
 
 				if (requested.Contains("transform")) AddProbeTransform(target, entry);
 				if (requested.Contains("bounds")) AddProbeBounds(target, meshTransform, mesh, entry);
-				if (requested.Contains("axis")) AddProbeAxis(meshTransform, mesh, expectedAxis, entry);
-				if (requested.Contains("shape")) AddProbeShape(meshTransform, mesh, entry);
+				if (requested.Contains("axis")) AddProbeAxis(meshTransform, mesh, expectedAxis, poseNote, entry);
+				if (requested.Contains("shape")) AddProbeShape(GetProbeSurface(surfaces, path), meshTransform, mesh, poseNote, entry);
 				if (requested.Contains("topology")) AddProbeTopology(mesh, entry);
 
-				if (requested.Contains("pair") && !surfaces.ContainsKey(path))
-				{
-					surfaces[path] = ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit);
-				}
 				entry.CloseObject();
 				objects.AddElement(entry);
 			}
@@ -548,6 +579,13 @@ namespace PiUnity
 			return ordered;
 		}
 
+		/// A cached surface by path, or null when the caller built none.
+		private static ProbeSurface GetProbeSurface(Dictionary<string, ProbeSurface> surfaces, string path)
+		{
+			ProbeSurface surface;
+			return surfaces.TryGetValue(path, out surface) ? surface : null;
+		}
+
 		/// Builds a pair member's surface on demand, because a pair names its
 		/// own objects and those need not be in the `objects` list.
 		private static void EnsureProbeSurface(string path, Dictionary<string, ProbeSurface> surfaces)
@@ -555,8 +593,8 @@ namespace PiUnity
 			if (surfaces.ContainsKey(path)) return;
 			GameObject target = FindGameObjectByPath(path);
 			if (target == null) throw new Exception("geometry-probe: pair references \"" + path + "\", which is not in the active scene.");
-			DescribeProbeMeshSource(target, new Json(), out Transform meshTransform, out Mesh mesh);
-			surfaces[path] = ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit);
+			DescribeProbeMeshSource(target, new Json(), out Transform meshTransform, out Mesh mesh, out string poseNote);
+			surfaces[path] = ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit, poseNote);
 		}
 
 		// ------------------------------------------------------------ per check
@@ -571,14 +609,21 @@ namespace PiUnity
 			GameObject target,
 			Json entry,
 			out Transform meshTransform,
-			out Mesh mesh)
+			out Mesh mesh,
+			out string poseNote)
 		{
 			MeshFilter filter = target.GetComponent<MeshFilter>();
 			SkinnedMeshRenderer skin = target.GetComponent<SkinnedMeshRenderer>();
 			meshTransform = target.transform;
+			poseNote = "";
 
 			if (filter != null && filter.sharedMesh != null) { mesh = filter.sharedMesh; return; }
-			if (skin != null && skin.sharedMesh != null) { mesh = skin.sharedMesh; return; }
+			if (skin != null && skin.sharedMesh != null)
+			{
+				mesh = skin.sharedMesh;
+				poseNote = BindPoseNote(skin, target);
+				return;
+			}
 
 			foreach (Transform child in target.GetComponentsInChildren<Transform>(true))
 			{
@@ -587,6 +632,7 @@ namespace PiUnity
 				{
 					mesh = childFilter.sharedMesh;
 					meshTransform = child.transform;
+					poseNote = BindPoseNote(target.GetComponentInChildren<SkinnedMeshRenderer>(true), child.gameObject);
 					entry.AddString("meshOwner", PathInScene(child.gameObject));
 					entry.AddString("meshState", "no mesh on \"" + target.name + "\" itself; measured the mesh on \"" + child.name + "\"");
 					return;
@@ -596,6 +642,7 @@ namespace PiUnity
 				{
 					mesh = childSkin.sharedMesh;
 					meshTransform = child.transform;
+					poseNote = BindPoseNote(childSkin, child.gameObject);
 					entry.AddString("meshOwner", PathInScene(child.gameObject));
 					entry.AddString("meshState", "no mesh on \"" + target.name + "\" itself; measured the skinned mesh on \"" + child.name + "\"");
 					return;
@@ -609,6 +656,29 @@ namespace PiUnity
 			entry.AddString("meshState", filter != null || skin != null
 				? "a mesh component is present but its mesh reference is empty, so there is no geometry to measure"
 				: "no MeshFilter or SkinnedMeshRenderer on this object or its children, so there is no geometry to measure");
+		}
+
+		/// The bind-pose caveat, or "" for a mesh that is not skinned.
+		///
+		/// A SkinnedMeshRenderer's sharedMesh is the REST-POSE mesh: the vertices
+		/// as bound, before any bone moved. Nothing here consults
+		/// boneTransforms or BakeMesh, and the transform applied to them is the
+		/// renderer's OWN -- so every figure derived from it (pair gaps, shape,
+		/// axis, convexity) describes a body that is not the one in the scene.
+		///
+		/// The default probe includes every skinned root, so on a posed avatar
+		/// this is the difference between a measurement and a description of a
+		/// different pose. BakeMesh would fix the numbers and cost a bake per
+		/// object on the main thread; a wrong-but-labelled number is the better
+		/// trade, and the label is what makes it honest.
+		private static string BindPoseNote(SkinnedMeshRenderer skin, GameObject owner)
+		{
+			if (skin == null) return "";
+			string name = owner == null ? skin.name : owner.name;
+			return "BIND POSE: \"" + name + "\" is skinned, and the figures below come from the REST-POSE mesh " +
+				"(" + skin.sharedMesh.vertexCount + " vertices, " + skin.bones.Length + " bones) carried by " +
+				"transform only. The skinning itself is not applied -- no BakeMesh, no boneTransforms -- so these " +
+				"numbers describe the model as bound, NOT how \"" + name + "\" stands right now.";
 		}
 
 		/// localScale against lossyScale, and the mirror that neither of the
@@ -729,7 +799,7 @@ namespace PiUnity
 		/// a rotation fix applies to. The mapping into world space is the
 		/// owner's rotation alone, and a negative scale contributes no
 		/// direction at all, so it is excluded rather than folded in.
-		private static void AddProbeAxis(Transform meshTransform, Mesh mesh, string expectedAxis, Json entry)
+		private static void AddProbeAxis(Transform meshTransform, Mesh mesh, string expectedAxis, string poseNote, Json entry)
 		{
 			Json node = new Json();
 			node.OpenObject();
@@ -767,7 +837,8 @@ namespace PiUnity
 			Matrix4x4 matrix = meshTransform.localToWorldMatrix;
 			Json measured = new Json();
 			measured.OpenObject();
-			measured.AddString("state", "derived from the mesh's LOCAL bounding box, so the axis is exact for an axis-aligned mesh and an approximation for a rotated or tapered one; a box's smallest axis is not always the part's own axis");
+			measured.AddString("state", "derived from the mesh's LOCAL bounding box, so the axis is exact for an axis-aligned mesh and an approximation for a rotated or tapered one; a box's smallest axis is not always the part's own axis"
+				+ (string.IsNullOrEmpty(poseNote) ? "" : ". " + poseNote));
 			measured.AddArray("thinAxisLocal", ProbeVector(thinLocal));
 			measured.AddArray("thinAxisWorld", ProbeVector(thinWorld));
 			measured.AddArray("longAxisLocal", ProbeVector(longLocal));
@@ -804,7 +875,7 @@ namespace PiUnity
 
 		/// Self-symmetry, convexity and open edges: the defects a render cannot
 		/// show, because the offending part faces away or is occluded.
-		private static void AddProbeShape(Transform meshTransform, Mesh mesh, Json entry)
+		private static void AddProbeShape(ProbeSurface sharedSurface, Transform meshTransform, Mesh mesh, string poseNote, Json entry)
 		{
 			Json node = new Json();
 			node.OpenObject();
@@ -851,7 +922,7 @@ namespace PiUnity
 
 			Json symmetry = MeasureProbeSymmetry(sampled, box);
 			node.AddValue("selfSymmetry", symmetry);
-			Json convexity = MeasureProbeConvexity(meshTransform, mesh, box, local);
+			Json convexity = MeasureProbeConvexity(sharedSurface, meshTransform, mesh, box, local, poseNote);
 			node.AddValue("convexity", convexity);
 
 			int[] indices;
@@ -900,7 +971,8 @@ namespace PiUnity
 			node.AddNumber("degenerateFaces", degenerate);
 			node.AddString(
 				"state",
-				"counts are exact over every triangle in the mesh; the symmetry and convexity figures are the sampled ones and say so themselves");
+				"counts are exact over every triangle in the mesh; the symmetry and convexity figures are the sampled ones and say so themselves"
+				+ (string.IsNullOrEmpty(poseNote) ? "" : ". " + poseNote));
 			if (stride > 1)
 			{
 				node.AddString(
@@ -1055,7 +1127,7 @@ namespace PiUnity
 		/// dumbbell is not star-shaped about its centre, so the ratio reads high
 		/// for a legitimately concave part -- which is a property of the test
 		/// and is stated rather than hidden.
-		private static Json MeasureProbeConvexity(Transform meshTransform, Mesh mesh, Bounds box, Vector3[] local)
+		private static Json MeasureProbeConvexity(ProbeSurface sharedSurface, Transform meshTransform, Mesh mesh, Bounds box, Vector3[] local, string poseNote)
 		{
 			Json node = new Json();
 			node.OpenObject();
@@ -1067,7 +1139,14 @@ namespace PiUnity
 				return node;
 			}
 
-			var surface = ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit);
+			// The SHARED surface the caller already built, not a second one. It was
+			// built here too, which re-read and re-transformed every vertex of the
+			// mesh a second time on every probe asking for both `shape` and
+			// `pair` -- that is every default probe, since `objects` omitted means
+			// all families run. The fallback covers a `shape`-only call whose
+			// caller somehow had no surface, so the figures are never absent.
+			ProbeSurface surface = sharedSurface
+				?? ProbeSurface.Build(meshTransform, mesh, kProbeVertexSampleLimit, kProbeTriangleSampleLimit, poseNote);
 			if (!surface.Available)
 			{
 				node.AddBool("available", false);
@@ -1112,7 +1191,8 @@ namespace PiUnity
 			node.AddNumber("deepestInsideHull", ProbeRound(worstDepth, 6));
 			node.AddString(
 				"state",
-				"radial test from the mesh's own bounding-box centre: a vertex counts as on the hull when the farthest hit along its direction is itself. Exact for a star-shaped mesh, and reading HIGH for a legitimately concave part such as a torus or a dumbbell, because the centre is outside their solid.");
+				"radial test from the mesh's own bounding-box centre: a vertex counts as on the hull when the farthest hit along its direction is itself. Exact for a star-shaped mesh, and reading HIGH for a legitimately concave part such as a torus or a dumbbell, because the centre is outside their solid."
+				+ (string.IsNullOrEmpty(poseNote) ? "" : " " + poseNote));
 			return node;
 		}
 
@@ -1241,6 +1321,21 @@ namespace PiUnity
 			node.AddString(
 				"state",
 				"non-manifold counts edges shared by MORE than two faces; a consistent-winding assumption is not made, so a mesh with flipped faces is reported here rather than corrected");
+			// The cost, stated where the numbers are. This walk is deliberately
+			// EXACT -- AddProbeTopology's own comment says a defect count is only
+			// worth reading when it is the real one -- so it is not capped, which
+			// means it runs on the Editor's main thread over every triangle of the
+			// mesh with no cancellation. On a heavy mesh the Editor is unresponsive
+			// for the duration, and there is no way to interrupt it short of closing
+			// the Editor. That is a property of the answer, not a bug to be
+			// silently fixed by sampling: a sampled defect count is a different
+			// number wearing the same key.
+			node.AddString(
+				"costNote",
+				"exact and UNCAPPED: this walked all " + (indices.Length / 3) + " triangles and, where counted, all "
+					+ mesh.vertexCount + " vertices on the main thread, with no cancellation. A heavy mesh holds the "
+					+ "Editor for the duration and cannot be interrupted. Lower `timeoutSeconds` if you would rather "
+					+ "wait than block.");
 			entry.AddValue("topology", node);
 		}
 
@@ -1319,8 +1414,11 @@ namespace PiUnity
 			else
 			{
 				verdict = "separated";
-				reason = "closest sampled surfaces are " + ProbeRound(closest, 5) + " m apart, beyond the "
-					+ ProbeRound(tolerance, 6) + " m tolerance";
+				reason = closest == double.MaxValue
+					? "no sampled vertex on either side found a triangle to measure against, so this pair has NO " +
+						"distance figure; one of the two meshes has vertices but no triangles"
+					: "closest sampled surfaces are " + ProbeRound(closest, 5) + " m apart, beyond the "
+						+ ProbeRound(tolerance, 6) + " m tolerance";
 			}
 
 			Json overlap = new Json();
@@ -1344,14 +1442,46 @@ namespace PiUnity
 
 			node.AddString("verdict", verdict);
 			node.AddString("reason", reason);
-			node.AddNumber("closestSurfaceDistance", closest == double.MaxValue ? 0.0 : ProbeRound(closest));
+			// A distance was MEASURED, or it was not. SampleAgainst skips every
+			// sample whose closest-point query fails, and that happens whenever the
+			// target surface has no triangles at all (Closest returns false with
+			// triangles.Length == 0) -- reachable for a mesh with vertices but no
+			// faces. Then `closest` is never assigned and stays double.MaxValue,
+			// which this used to render as 0.0: a number that reads as TOUCHING on
+			// a pair whose verdict says "separated". A caller trusting "numbers
+			// instead of guesses" would have taken the 0 as the measurement.
+			//
+			// So the number is omitted rather than invented, and the reason says
+			// why: absent is not the same claim as zero.
+			if (closest == double.MaxValue)
+			{
+				node.AddString(
+					"distanceState",
+					"closestSurfaceDistance is ABSENT, not zero: no sample on either side of the pair found a triangle " +
+					"to measure against, so no distance was taken. One of the two meshes has vertices but no " +
+					"triangles. A 0 here would read as \"the surfaces touch\", which is the opposite of what was found.");
+			}
+			else
+			{
+				node.AddNumber("closestSurfaceDistance", ProbeRound(closest));
+			}
 			node.AddNumber("deepestPenetration", ProbeRound(deepest));
 			node.AddValue("verticesInsideTarget", insideCounts);
 			node.AddValue("sampledVertexCount", sampledCounts);
 			node.AddValue("boundingBoxOverlap", overlap);
 			node.AddString(
 				"state",
-				"inside is a sign test against the nearest face normal, which is only meaningful on a CLOSED mesh: an open surface reports a side rather than an interior, so a non-zero verticesInsideTarget on a mesh with open edges may be that. Distance and penetration are to the SAMPLED triangles, and a negative boundingBoxOverlap component means separated on that axis.");
+				"inside is a sign test against the nearest face normal, which is only meaningful on a CLOSED mesh: an open surface reports a side rather than an interior, so a non-zero verticesInsideTarget on a mesh with open edges may be that. Distance and penetration are to the SAMPLED triangles, and a negative boundingBoxOverlap component means separated on that axis."
+				// A skinned member makes EVERY number here about a pose that is not
+				// the one in the scene, which is exactly the claim this tool makes
+				// not to make. Named on the pair itself rather than only on the
+				// object entry, because a caller reading pairs[] is reading the
+				// gap.
+				+ (first.BindPose || second.BindPose
+					? " BIND POSE: at least one side of this pair is skinned, and its figures come from the REST-POSE "
+						+ "mesh carried by transform only -- no BakeMesh, no boneTransforms. This gap describes the model "
+						+ "as bound, not how the two objects stand right now."
+					: ""));
 			node.CloseObject();
 			return node;
 		}

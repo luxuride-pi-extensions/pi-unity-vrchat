@@ -822,6 +822,15 @@ namespace PiUnity
 							typeName = value.Substring(0, colon);
 							objectName = value.Substring(colon + 1);
 						}
+						// Three states, not two.
+						//
+						// A failed object-reference lookup used to be a null, and a
+						// null assigned to the property CLEARS the field: a typo in
+						// `unity_set_property` silently emptied a reference, the write
+						// was applied, SetDirty was called and the response said
+						// ok:true. Null is only the right answer for the explicit
+						// `none` clear below, so everything else either resolves or
+						// throws with the type, the value, and what to do instead.
 						property.objectReferenceValue = ResolveObjectReference(typeName, objectName);
 						return;
 					}
@@ -835,23 +844,27 @@ namespace PiUnity
 
 		private static UnityEngine.Object ResolveObjectReference(string typeName, string objectName)
 		{
-			// Empty name means "clear the reference", which is a legitimate edit.
-			if (string.IsNullOrEmpty(objectName) && !typeName.Equals("none", StringComparison.OrdinalIgnoreCase))
-			{
-				return null;
-			}
+			// "none" is the EXPLICIT clear, and it is the only spelling that means
+			// one. It is a branch of its own so it cannot be reached by accident
+			// through a name that simply failed to resolve.
 			if (typeName.Equals("none", StringComparison.OrdinalIgnoreCase)) return null;
+			// Empty name means "clear the reference", which is a legitimate edit
+			// ("Texture:" with nothing after the colon).
+			if (string.IsNullOrEmpty(objectName)) return null;
 
 			// Resolved by name rather than path: a caller reading the value back
 			// sees "Type:Name", so it must accept the same. Resources
 			// .FindObjectsOfTypeAll takes a single Type, not an array, so this
 			// walks the matching types individually.
+			int searched = 0;
+			var unsearchable = new List<string>();
 			foreach (Type type in AppDomain.CurrentDomain.GetAssemblies()
 				.SelectMany(assembly => { try { return assembly.GetTypes(); } catch (Exception) { return new Type[0]; } })
 				.Where(type => type.Name == typeName || type.FullName == typeName)
 				.ToArray())
 			{
 				if (!typeof(UnityEngine.Object).IsAssignableFrom(type)) continue;
+				searched++;
 				try
 				{
 					foreach (UnityEngine.Object candidate in Resources.FindObjectsOfTypeAll(type))
@@ -859,12 +872,40 @@ namespace PiUnity
 						if (candidate != null && candidate.name == objectName) return candidate;
 					}
 				}
-				catch (Exception)
+				catch (Exception error)
 				{
-					// A type FindObjectsOfTypeAll cannot handle; keep looking.
+					// A type FindObjectsOfTypeAll cannot handle. Previously this
+					// was swallowed and the loop ended with the same null a genuine
+					// miss returns, so "this type cannot be searched" and "no such
+					// object" were indistinguishable -- and the first is not evidence
+					// about the second. Recorded and reported below instead.
+					unsearchable.Add(type.FullName + " (" + error.Message + ")");
 				}
 			}
-			return null;
+
+			string spelled = objectName;
+			if (searched == 0)
+			{
+				throw new Exception(
+					"No Unity object type named \"" + typeName + "\" exists, so \"" + typeName + ":" + spelled +
+					"\" cannot be assigned. Check the type name (a bare class name or a full name both work), and read " +
+					"the component types actually on the object with unity_inspect { gameObject: \"<name>\" }."
+				);
+			}
+			if (unsearchable.Count > 0 && unsearchable.Count == searched)
+			{
+				throw new Exception(
+					"Could not search for \"" + typeName + ":" + spelled + "\": the scene could not be searched for " +
+					string.Join(", ", unsearchable.ToArray()) +
+					". This is not a statement about whether the object exists -- nothing was checked."
+				);
+			}
+			throw new Exception(
+				"No object of type \"" + typeName + "\" named \"" + spelled + "\" was found, so the reference was " +
+				"NOT cleared. A name must match an object exactly; list the candidates with " +
+				"unity_scene_info { categories: [\"objects\"] }, and pass the value back as \"<Type>:<Name>\". To " +
+				"clear the field deliberately, pass \"none\"."
+			);
 		}
 
 		private static string[] SplitNumbers(string value)
