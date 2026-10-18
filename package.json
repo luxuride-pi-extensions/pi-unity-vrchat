@@ -33,5 +33,9 @@
     "unity",
     "vrchat",
     "unity-2022"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luxuride-pi-extensions/pi-unity-vrchat.git"
+  }
 }
