@@ -70,7 +70,7 @@ let unitySpawnInFlight = false;
 let unityWatchdog: NodeJS.Timeout | undefined;
 
 function warn(message: string): void {
-	console.error(`[pi-unity] warning: ${message}`);
+	console.error(`[unity-vrchat] warning: ${message}`);
 }
 
 function fromEnv(): UnityArgv | undefined {

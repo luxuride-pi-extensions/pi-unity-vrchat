@@ -1,11 +1,16 @@
-# pi-unity
+# unity-vrchat
 
-Live Unity Editor integration for [pi](https://github.com/badlogic/pi). The agent
-gets `unity_*` tools and a `/unity` command that operate on a *real, running*
-Unity Editor — the same design as `pi-blender`, adapted to the fact that
-Unity has no scripting console.
+Live Unity Editor integration for [pi](https://github.com/badlogic/pi), built
+for **VRChat projects on Unity 2022.3 LTS** (the version the VRChat SDK pins).
+The agent gets `unity_*` tools and a `/unity` command that operate on a *real,
+running* Unity Editor — the same design as `pi-blender`, adapted to the fact
+that Unity has no scripting console.
 
-MIT. Extracted from the `pi-unity` 0.1.0 prototype.
+This is not a general-purpose Unity extension for current Unity releases: the
+bridge and its workarounds are measured against 2022.3, and a future Unity 6
+extension would be a separate package.
+
+MIT. Extracted from the `unity-vrchat` 0.1.0 prototype.
 
 ---
 
@@ -35,8 +40,16 @@ Three consequences you will feel:
 
 ## Install
 
+The released package installs with pi itself:
+
 ```bash
-ln -sfn "$PWD" ~/.pi/agent/extensions/pi-unity
+pi install npm:@luxuride-pi/unity
+```
+
+For development from a clone (symlink install):
+
+```bash
+ln -sfn "$PWD" ~/.pi/agent/extensions/unity-vrchat
 ```
 
 Two things the installer cannot do for you:
@@ -65,8 +78,8 @@ Two things the installer cannot do for you:
 | --- | --- | --- |
 | `UNITY_PATH` | auto | Editor binary. **Whitespace-split into argv**, so `UNITY_PATH="flatpak run org.unity.Unity"` works without a shell. |
 | `UNITY_HUB_PATH` | `~/Unity/Hub` | Hub install root. |
-| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/pi-unity/bridge` | Request/response queue shared with the C# plugin. |
-| `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/pi-unity/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
+| `PI_UNITY_BRIDGE_DIR` | `$XDG_CACHE_HOME/unity-vrchat/bridge` | Request/response queue shared with the C# plugin. |
+| `PI_UNITY_TMP_DIR` | `$XDG_CACHE_HOME/unity-vrchat/tmp` | Staging for transfer payloads and generated C# snippets. Kept out of the workspace so a failed import never leaves junk in `Assets/`. |
 | `PI_UNITY_NO_UI` | unset | `1` opts out of auto-launching the Editor entirely. Distinct from the no-project gate, which is on by default and needs no env var. |
 | `PI_TODO_ENTRY` | `$PI_AGENT_DIR/npm/node_modules/@juicesharp/rpiv-todo/index.ts` | Install-time only. Pin the todo package when the agent templates name `todo` in `tools:` and the package is not in that npm tree; without it a worker is handed a `todo` it can never call. |
 | `XDG_CONFIG_HOME` | auto | **Read, not set** — see below. Only consulted when it is unset. |
@@ -573,21 +586,22 @@ its script must clean them up itself.
 
 ## Releases
 
-Every release is a **git tag**, not a published npm package. All four packages
-in this organization are `"private": true`, so `npm publish` refuses them, and
-unsetting that flag to get a publish through would trade a correct manifest for
-a working script.
+Every release is both a **git tag** and an npm package. The package publishes
+as `@luxuride-pi/unity` from the release workflow via npm trusted publishing (OIDC from
+GitHub Actions — no publish token exists anywhere).
 
-pi installs this extension from the **clone**, not from a tarball: `installGit()`
-runs `git clone`, an optional `git checkout <ref>`, then
+pi can also install this extension from the **clone**: `installGit()` runs
+`git clone`, an optional `git checkout <ref>`, then
 `npm install --legacy-peer-deps` inside it, and pi loads the extension's
-TypeScript straight from source through jiti. So a tag *is* the artifact — there
-is no build step and nothing to compile.
+TypeScript straight from source through jiti. So a tag *is* the artifact for a
+git install — there is no build step and nothing to compile.
 
 ### Install a release
 
 ```bash
-pi install git:github.com/luxuride-pi-extensions/pi-unity@v<version>
+pi install npm:@luxuride-pi/unity@^<version>
+# or, from the clone:
+pi install git:github.com/luxuride-pi-extensions/unity-vrchat@v<version>
 ```
 
 The `@ref` is what pins the version; without it pi tracks the default branch, so

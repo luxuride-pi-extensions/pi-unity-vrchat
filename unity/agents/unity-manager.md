@@ -17,7 +17,7 @@
 # the record stays true.
 #
 # `tools:` records the toolset this role assumes. `extensions:` records the two
-# extensions that must be installed for that toolset to exist (the pi-unity
+# extensions that must be installed for that toolset to exist (the unity-vrchat
 # extension, and the todo package this role depends on).
 #
 # `ask_user_question` is the one tool in that line with no entry below in

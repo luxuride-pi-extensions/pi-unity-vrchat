@@ -24,7 +24,7 @@ import { join } from "node:path";
 
 import { JITI } from "./paths.mjs";
 
-const tmp = mkdtempSync(join(tmpdir(), "pi-unity-launch-gate-"));
+const tmp = mkdtempSync(join(tmpdir(), "unity-vrchat-launch-gate-"));
 const bridgeDir = join(tmp, "bridge");
 const launchMarker = join(tmp, "editor-launched.txt");
 

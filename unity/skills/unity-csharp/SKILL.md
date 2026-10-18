@@ -1,6 +1,6 @@
 ---
 name: unity-csharp
-description: Write C# that runs inside the live Unity Editor through pi-unity — entry points, available APIs, and the traps that fail silently.
+description: Write C# that runs inside the live Unity Editor through unity-vrchat — entry points, available APIs, and the traps that fail silently.
 ---
 
 # Unity C# for the pi Bridge

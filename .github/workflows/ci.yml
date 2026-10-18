@@ -230,13 +230,13 @@ jobs:
             (cd "projects/$repo" && npm ci --legacy-peer-deps)
           done
 
-      - name: install pi-unity
+      - name: install unity-vrchat
         run: npm ci --legacy-peer-deps
 
       # The suite loads extensions out of the INSTALLED extensions dir, not
       # from sibling checkouts: agent-templates.mjs and engagement-test.mjs
       # resolve a manager's tools by loading every extension named in its
-      # prompt, and doc-consistency.mjs reads pi-unity's index.ts from there.
+      # prompt, and doc-consistency.mjs reads unity-vrchat's index.ts from there.
       # A checkout that is not installed is silently absent.
       #
       # The names are the ones pi installs under, which are not the repo names:
@@ -246,7 +246,7 @@ jobs:
         run: |
           agent="$RUNNER_TEMP/agent-dir/extensions"
           mkdir -p "$agent"
-          ln -s "$GITHUB_WORKSPACE"                          "$agent/pi-unity"
+          ln -s "$GITHUB_WORKSPACE"                          "$agent/unity-vrchat"
           ln -s "$GITHUB_WORKSPACE/projects/pi-blender"      "$agent/pi-blender"
           ln -s "$GITHUB_WORKSPACE/projects/pi-unity-blender" \
             "$agent/unity-blender"

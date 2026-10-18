@@ -43,7 +43,7 @@ function check(name, condition, detail = "") {
 	}
 }
 
-const tmpRoot = mkdtempSync(join(tmpdir(), "pi-unity-scratch-"));
+const tmpRoot = mkdtempSync(join(tmpdir(), "unity-vrchat-scratch-"));
 
 /**
  * Calls `fn` with PI_UNITY_TMP_DIR set to `dir` and the modules loaded FRESH.

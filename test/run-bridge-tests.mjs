@@ -75,7 +75,7 @@ async function controlApplied(bridgeDir, timeoutMs = 5_000) {
 }
 
 async function withEditor(fn) {
-	const dir = mkdtempSync(join(tmpdir(), "pi-unity-bridge-"));
+	const dir = mkdtempSync(join(tmpdir(), "unity-vrchat-bridge-"));
 	const bridgeDir = join(dir, "bridge");
 	for (const sub of ["requests", "responses"]) {
 		// The TS side creates these itself, but the double reads at startup.
@@ -390,7 +390,7 @@ await withEditor(async () => {
 	// and threw, so every turn asked from a non-workspace directory reported
 	// "No pi Unity workspace at <cwd>" while a perfectly good answer sat
 	// unused. That made the injected block cry wolf on every single turn.
-	const emptyDir = mkdtempSync(join(tmpdir(), "pi-unity-no-manifest-"));
+	const emptyDir = mkdtempSync(join(tmpdir(), "unity-vrchat-no-manifest-"));
 	try {
 		const result = await session.unitySessionContext({ cwd: emptyDir });
 		check(
@@ -915,8 +915,8 @@ await withEditor(async () => {
 	// Two unrelated directories, deliberately named so no prefix of one is a
 	// prefix of the other: a cwd inside the workspace would let a
 	// resolve()-only implementation pass by accident.
-	const cwd = mkdtempSync(join(tmpdir(), "pi-unity-session-cwd-"));
-	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-workspace-"));
+	const cwd = mkdtempSync(join(tmpdir(), "unity-vrchat-session-cwd-"));
+	const workspace = mkdtempSync(join(tmpdir(), "unity-vrchat-workspace-"));
 	const manifest = {
 		version: 2,
 		id: "test",
@@ -1032,8 +1032,8 @@ console.log("session workspace memory");
 await withEditor(async () => {
 	const index = await jiti.import(join(EXT, "index.ts"), { default: false });
 
-	const cwd = mkdtempSync(join(tmpdir(), "pi-unity-session-cwd-"));
-	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-adopted-"));
+	const cwd = mkdtempSync(join(tmpdir(), "unity-vrchat-session-cwd-"));
+	const workspace = mkdtempSync(join(tmpdir(), "unity-vrchat-adopted-"));
 	writeFileSync(
 		join(workspace, "unity-workspace.json"),
 		JSON.stringify({
@@ -1108,7 +1108,7 @@ await withEditor(async ({ setControl }) => {
 
 	// unityExecuteCSharp insists on a manifest, so the run happens against a
 	// throwaway one. projectPath points at the fake Editor's project.
-	const workspace = mkdtempSync(join(tmpdir(), "pi-unity-snippet-output-"));
+	const workspace = mkdtempSync(join(tmpdir(), "unity-vrchat-snippet-output-"));
 	writeFileSync(
 		join(workspace, "unity-workspace.json"),
 		JSON.stringify({

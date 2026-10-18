@@ -54,7 +54,7 @@ function check(name, condition, detail = "") {
  * the wire is not the same assertion as "the call did not throw".
  */
 async function withEditor(fn) {
-	const dir = mkdtempSync(join(tmpdir(), "pi-unity-defaults-"));
+	const dir = mkdtempSync(join(tmpdir(), "unity-vrchat-defaults-"));
 	const bridgeDir = join(dir, "bridge");
 	for (const sub of ["requests", "responses"]) mkdirSync(join(bridgeDir, sub), { recursive: true });
 	writeFileSync(join(bridgeDir, "control.json"), "{}");

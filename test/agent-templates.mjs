@@ -120,12 +120,12 @@ function frontmatter(source, key) {
 }
 
 const TEMPLATE_DIRS = {
-	"pi-unity": "unity/agents",
+	"unity-vrchat": "unity/agents",
 	"unity-blender": "agents",
 };
 
 /** Every extension whose tools a template may name, including ones with no templates here. */
-const PROVIDER_DIRS = ["pi-unity", "pi-blender", "unity-blender"];
+const PROVIDER_DIRS = ["unity-vrchat", "pi-blender", "unity-blender"];
 
 /**
  * Which extension dir each placeholder the installers substitute resolves to.
@@ -139,7 +139,7 @@ const PROVIDER_DIRS = ["pi-unity", "pi-blender", "unity-blender"];
  * it resolves to nothing here and the todo checks below cover it instead.
  */
 const PLACEHOLDER_OWNERS = new Map([
-	["__PI_PI_UNITY_EXT_DIR__", "pi-unity"],
+	["__PI_PI_UNITY_EXT_DIR__", "unity-vrchat"],
 	["__PI_BLENDER_DIR__", "pi-blender"],
 ]);
 

@@ -24,7 +24,7 @@ const { createJiti } = await import(JITI);
 const jiti = createJiti(import.meta.url, { isolated: true, interopDefault: true });
 const { findProjectScene } = await jiti.import(join(import.meta.dirname, "..", "unity", "init.ts"));
 
-const tmp = mkdtempSync(join(tmpdir(), "pi-unity-scene-"));
+const tmp = mkdtempSync(join(tmpdir(), "unity-vrchat-scene-"));
 
 let passed = 0;
 const failures = [];

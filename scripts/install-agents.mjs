@@ -73,7 +73,7 @@ function resolveTodoEntry() {
  * starts happening again.
  */
 
-const PI_UNITY_EXT = resolveInstalledExtensionDir("pi-unity");
+const PI_UNITY_EXT = resolveInstalledExtensionDir("unity-vrchat");
 
 // The Unity-Blender manager is NOT listed here. It lives in the binder repo
 // (pi-unity-blender/agents/) because it is a SIBLING top-level prompt rather

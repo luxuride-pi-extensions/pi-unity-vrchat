@@ -31,7 +31,7 @@ const core = loadManagerCore();
 
 const EXTENSION_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
-export const APP_NAME = "pi-unity";
+export const APP_NAME = "unity-vrchat";
 
 export const ENV_UNITY_BRIDGE_DIR = "PI_UNITY_BRIDGE_DIR";
 export const ENV_UNITY_TMP_DIR = "PI_UNITY_TMP_DIR";
@@ -111,7 +111,7 @@ export function getUnityBridgeDir(): string {
 	if (envDir) {
 		return expandUserPath(envDir);
 	}
-	return join(xdgCacheHome(), "pi-unity", "bridge");
+	return join(xdgCacheHome(), "unity-vrchat", "bridge");
 }
 
 /**
@@ -122,7 +122,7 @@ export function getUnityBridgeDir(): string {
  * the refusal is loud. The reason is not tidiness: every staged file here is a
  * real asset the moment it lands under Assets/ -- Unity imports it, and an
  * inlineCode snippet compiles a SECOND time into the user's Assembly-CSharp on
- * the next refresh, silently. The default (~/.cache/pi-unity/tmp) cannot do
+ * the next refresh, silently. The default (~/.cache/unity-vrchat/tmp) cannot do
  * this, so the check is exactly about the override: without it the one
  * configuration that causes the damage is the one that is accepted.
  *
@@ -134,7 +134,7 @@ export function getUnityBridgeDir(): string {
  */
 export function getUnityTempDir(): string {
 	const configured = process.env[ENV_UNITY_TMP_DIR]?.trim();
-	const dir = expandUserPath(configured || join(xdgCacheHome(), "pi-unity", "tmp"));
+	const dir = expandUserPath(configured || join(xdgCacheHome(), "unity-vrchat", "tmp"));
 	if (configured) assertNotInsideAssets(dir, ENV_UNITY_TMP_DIR);
 	mkdirSync(dir, { recursive: true });
 	return dir;

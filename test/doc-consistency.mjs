@@ -54,7 +54,7 @@ const pi = {
 	sendUserMessage: () => {},
 };
 
-const extension = await jiti.import(join(INSTALLED_EXTENSIONS, "pi-unity", "index.ts"));
+const extension = await jiti.import(join(INSTALLED_EXTENSIONS, "unity-vrchat", "index.ts"));
 await extension.default(pi);
 
 const registered = new Set(tools);
