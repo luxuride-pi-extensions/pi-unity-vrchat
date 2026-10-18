@@ -1,18 +1,12 @@
-# unity-vrchat
+# pi-unity-vrchat
 
-Live Unity Editor integration for [pi](https://github.com/badlogic/pi), built
-for **VRChat projects on Unity 2022.3 LTS** (the version the VRChat SDK pins).
-The agent gets `unity_*` tools and a `/unity` command that operate on a *real,
-running* Unity Editor — the same design as `pi-blender`, adapted to the fact
-that Unity has no scripting console.
+Pi extension: live Unity Editor integration for **VRChat projects on Unity
+2022.3 LTS** (the version the VRChat SDK pins). The agent gets `unity_*` tools
+and a `/unity` command that operate on a *real, running* Unity Editor.
 
 This is not a general-purpose Unity extension for current Unity releases: the
 bridge and its workarounds are measured against 2022.3, and a future Unity 6
 extension would be a separate package.
-
-MIT. Extracted from the `unity-vrchat` 0.1.0 prototype.
-
----
 
 ## Tools
 
@@ -50,64 +44,46 @@ The `/unity` command engages manager mode over these tools; child agents
 (`unity-worker`, `unity-critic`, `unity-diagnostician`, `unity-finalizer`,
 `vrchat-unity-avatar`, `vrchat-unity-world`) do the tool-level work.
 
----
-
 ## Install
-
-The released package installs with pi itself:
 
 ```bash
 pi install npm:@luxuride-pi/unity-vrchat
 ```
 
-For development from a clone (symlink install):
+The child agents above must also exist in `$PI_AGENT_DIR/agents`. The
+extension ships its agent templates, so install them once from the installed
+copy:
 
 ```bash
-ln -sfn "$PWD" ~/.pi/agent/extensions/unity-vrchat
+node scripts/install-agents.mjs            # dry run: print resolved paths
+node scripts/install-agents.mjs --write    # install into $PI_AGENT_DIR/agents
 ```
 
-Two things the installer cannot do for you:
+The Unity Editor is autodetected (`UNITY_PATH`, macOS app bundle, newest
+install under the Unity Hub, `PATH`). Set `UNITY_PATH` if yours lives
+elsewhere.
 
-- **`node_modules/typebox` is a symlink into pi's own install.** pi bundles
-  typebox and `jiti` resolves it from there. If pi's layout changes, repoint:
-  ```bash
-  ln -sfn "$(dirname "$(readlink -f "$(which pi)")")/../node_modules/typebox" node_modules/typebox
-  ```
-- **Agent templates are not auto-registered.** `resources_discover` only carries
-  `skillPaths` — there is no hook for agent definitions. Copy them yourself:
-  ```bash
-  cp unity/agents/unity-worker.md ~/.pi/agent/agents/
-  cp unity/agents/unity-critic.md ~/.pi/agent/agents/
-  ```
-  Then set the frontmatter `extensions:` field to the **absolute** path of this
-  directory. No `~`, no env vars — that field is not expanded. This is not
-  optional: child agents do not inherit ambient extensions, and it is exactly
-  what makes `unity_*` available to them.
-
----
+Usage, workspace semantics, environment variables and per-tool behaviour:
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## Releases
 
 Every release is both a **git tag** and an npm package. The package publishes
-as `@luxuride-pi/unity-vrchat` from the release workflow via npm trusted publishing (OIDC from
-GitHub Actions — no publish token exists anywhere).
+as `@luxuride-pi/unity-vrchat` from the release workflow via npm trusted
+publishing (OIDC from GitHub Actions — no publish token exists anywhere).
 
-pi can also install this extension from the **clone**: `installGit()` runs
-`git clone`, an optional `git checkout <ref>`, then
-`npm install --legacy-peer-deps` inside it, and pi loads the extension's
-TypeScript straight from source through jiti. So a tag *is* the artifact for a
-git install — there is no build step and nothing to compile.
+pi can also install this extension from a **git ref**: pi clones, checks out
+the ref, runs `npm install --legacy-peer-deps`, and loads the extension's
+TypeScript straight from source — so a tag *is* the artifact; there is no
+build step and nothing to compile.
 
 ### Install a release
 
 ```bash
 pi install npm:@luxuride-pi/unity-vrchat@^<version>
-# or, from the clone:
+# or, pinned to a git tag:
 pi install git:github.com/luxuride-pi-extensions/pi-unity-vrchat@v<version>
 ```
-
-The `@ref` is what pins the version; without it pi tracks the default branch, so
-an unpinned spec is not a release, it is a moving target.
 
 ### Cut a release
 
@@ -119,13 +95,10 @@ an unpinned spec is not a release, it is a moving target.
 3. `.github/workflows/release.yml` packs the tarball, checks it, and publishes
    the release with generated notes.
 
-Step 2 is the one that is easy to get wrong, so the workflow refuses to guess:
-it fails when the tag is not on the commit being released, and again when the
-tag does not match `package.json`'s `version`. Bump the version *before*
-tagging; the tag is not the place to bump.
+The workflow refuses to guess: it fails when the tag is not on the commit being
+released, and again when the tag does not match `package.json`'s `version`.
+Bump the version *before* tagging; the tag is not the place to bump.
 
-The `npm pack --dry-run` check in the release workflow is deliberately a copy of
-what `pi-manager-core`'s `test/package-contents.mjs` proves on every CI run. A
-release workflow that borrowed the check from another repository would depend on
-that repository being checked out at the right ref, which is a moving part a
-release should not have.
+## License
+
+MIT
