@@ -63,6 +63,16 @@ The Unity Editor is autodetected (`UNITY_PATH`, macOS app bundle, newest
 install under the Unity Hub, `PATH`). Set `UNITY_PATH` if yours lives
 elsewhere.
 
+### Subagent activation
+
+Manager sessions delegate through pi's `subagent` tool. A session on a model that
+can add tools mid-conversation starts with only `subagents_enable` active, and
+the manager calls it once before the first spawn; every other session has
+`subagent` from the start and never touches the loader. To keep `subagent`
+always active, set `"toolActivation": "eager"` in
+`~/.pi/agent/extensions/subagent/config.json`, or start pi with
+`--exclude-tools subagents_enable`.
+
 Usage, workspace semantics, environment variables and per-tool behaviour:
 [docs/DESIGN.md](docs/DESIGN.md).
 

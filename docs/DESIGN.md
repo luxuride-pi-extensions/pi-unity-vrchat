@@ -304,8 +304,8 @@ works. The Editor logging to stdout will not break your launch.
 ## Modular work
 
 ```
-unity_create ... → call subagents_enable first
-  Manager
+unity_create ... → Manager
+  (call subagents_enable only if `subagent` is absent)
     ├─ unity-worker (module "body")
     └─ unity-worker (module "rig")
   critic
