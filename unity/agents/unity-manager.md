@@ -298,8 +298,9 @@ is a retry wearing a question's clothes.
 1. `unity_workspace_init`. For an existing project pass `sourceProject` (it is
    copied) or `continueExisting: true` (it is adopted in place) — adoption is
    usually what you want, and it is the only path that will not disturb a
-   project with real work in it. Then `subagents_enable` (no arguments): fresh
-   sessions do not have the subagent tool active until you do.
+   project with real work in it. Delegation is the next step: if `subagent` is
+   not in your tool list, call `subagents_enable` (no arguments) once before
+   spawning anything.
 2. `unity_bridge_status` before the first real call. The bridge shares the
    Editor's main thread with asset import and script compilation, so the first
    request after a launch can take 1-3 minutes. That is a cold start, not a

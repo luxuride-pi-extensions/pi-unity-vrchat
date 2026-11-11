@@ -22,8 +22,9 @@ reverts independently.
 
 ## Flow
 
-1. `subagents_enable` once — fresh sessions do not have the subagent tool
-   active until you enable it.
+1. Delegate: `subagent` is active in most sessions. If it is not in your tool
+   list, call `subagents_enable` once first — some providers surface it only on
+   the following turn, so wait rather than retrying.
 2. Delegate one worker per module with a compact brief: goal, GameObject names
    it owns, acceptance criteria, workspace + module name.
 3. Each worker runs `unity_module_run { workspace, moduleName, render: true }`
